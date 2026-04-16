@@ -2,6 +2,8 @@ apiVersion: datasciencecluster.opendatahub.io/v2
 kind: DataScienceCluster
 metadata:
   name: {{ .Values.datasciencecluster.name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   components:
     dashboard:
@@ -12,22 +14,14 @@ spec:
         managementState: {{ .Values.datasciencecluster.components.modelsAsService.managementState }}
     llamastackoperator:
       managementState: {{ .Values.datasciencecluster.components.llamastackoperator.managementState }}
-    aipipelines:
-      managementState: {{ .Values.datasciencecluster.components.aipipelines.managementState }}
     feastoperator:
       managementState: {{ .Values.datasciencecluster.components.feastoperator.managementState }}
     kueue:
       managementState: {{ .Values.datasciencecluster.components.kueue.managementState }}
-    mlflowoperator:
-      managementState: {{ .Values.datasciencecluster.components.mlflowoperator.managementState }}
     modelregistry:
       managementState: {{ .Values.datasciencecluster.components.modelregistry.managementState }}
     ray:
       managementState: {{ .Values.datasciencecluster.components.ray.managementState }}
-    sparkoperator:
-      managementState: {{ .Values.datasciencecluster.components.sparkoperator.managementState }}
-    trainer:
-      managementState: {{ .Values.datasciencecluster.components.trainer.managementState }}
     trainingoperator:
       managementState: {{ .Values.datasciencecluster.components.trainingoperator.managementState }}
     trustyai:

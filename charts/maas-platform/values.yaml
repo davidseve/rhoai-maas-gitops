@@ -13,21 +13,13 @@ datasciencecluster:
       managementState: Managed
     modelsAsService:
       managementState: Managed
-    aipipelines:
-      managementState: Removed
     feastoperator:
       managementState: Removed
     kueue:
       managementState: Removed
-    mlflowoperator:
-      managementState: Removed
     modelregistry:
       managementState: Removed
     ray:
-      managementState: Removed
-    sparkoperator:
-      managementState: Removed
-    trainer:
       managementState: Removed
     trainingoperator:
       managementState: Removed

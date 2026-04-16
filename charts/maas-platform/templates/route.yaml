@@ -4,10 +4,11 @@ kind: Route
 metadata:
   name: {{ .Values.route.name }}
   namespace: {{ .Values.route.namespace }}
-  {{- if eq .Values.route.tlsTermination "reencrypt" }}
   annotations:
+    argocd.argoproj.io/sync-wave: "3"
+    {{- if eq .Values.route.tlsTermination "reencrypt" }}
     router.openshift.io/service-ca-certificate: "true"
-  {{- end }}
+    {{- end }}
 spec:
   host: maas.{{ required "clusterDomain is required" .Values.clusterDomain }}
   port:
