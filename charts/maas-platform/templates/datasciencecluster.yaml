@@ -3,7 +3,7 @@ kind: DataScienceCluster
 metadata:
   name: {{ .Values.datasciencecluster.name }}
   annotations:
-    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   components:
     dashboard:
