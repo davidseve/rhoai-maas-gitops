@@ -26,4 +26,7 @@ spec:
             values:
             - {{ .Values.gateway.namespace }}
             - redhat-ods-applications
+            {{- range .Values.gateway.modelNamespaces }}
+            - {{ . }}
+            {{- end }}
 {{- end }}

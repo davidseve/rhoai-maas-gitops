@@ -44,6 +44,8 @@ gateway:
   #   annotate the gateway svc with service.beta.openshift.io/serving-cert-secret-name
   #   e.g. maas-gateway-service-tls
   tlsSecretName: ingress-certs
+  modelNamespaces:
+    - maas-models
 
 route:
   enabled: true
