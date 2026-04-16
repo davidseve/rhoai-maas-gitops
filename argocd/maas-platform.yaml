@@ -33,6 +33,10 @@ spec:
         factor: 2
         maxDuration: 15m
   ignoreDifferences:
+    - group: dscinitialization.opendatahub.io
+      kind: DSCInitialization
+      jsonPointers:
+        - /spec
     - group: datasciencecluster.opendatahub.io
       kind: DataScienceCluster
       jsonPointers:
