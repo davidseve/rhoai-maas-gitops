@@ -31,8 +31,6 @@ mode: inferenceservice
 # InferenceService settings (mode: inferenceservice)
 inferenceservice:
   replicas: 1
-  route:
-    enabled: true
 
 # LLMInferenceService settings (mode: llminferenceservice)
 llminferenceservice:

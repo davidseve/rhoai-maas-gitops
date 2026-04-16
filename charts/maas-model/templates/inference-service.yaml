@@ -28,21 +28,4 @@ spec:
           memory: {{ .Values.resources.requests.memory | quote }}
       runtime: vllm-cpu
       storageUri: {{ .Values.model.storageUri | quote }}
-{{- if .Values.inferenceservice.route.enabled }}
----
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: {{ .Values.global.name }}
-  namespace: {{ .Values.global.namespace }}
-spec:
-  to:
-    kind: Service
-    name: {{ .Values.global.name }}-predictor
-  port:
-    targetPort: 8443
-  tls:
-    termination: passthrough
-  wildcardPolicy: None
-{{- end }}
 {{- end }}
