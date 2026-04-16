@@ -25,12 +25,13 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
       - RespectIgnoreDifferences=true
+      - SkipDryRunOnMissingResource=true
     retry:
-      limit: 10
+      limit: 30
       backoff:
-        duration: 30s
+        duration: 15s
         factor: 2
-        maxDuration: 10m
+        maxDuration: 15m
   ignoreDifferences:
     - group: datasciencecluster.opendatahub.io
       kind: DataScienceCluster

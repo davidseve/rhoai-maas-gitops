@@ -2,8 +2,6 @@ apiVersion: datasciencecluster.opendatahub.io/v2
 kind: DataScienceCluster
 metadata:
   name: {{ .Values.datasciencecluster.name }}
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
 spec:
   components:
     dashboard:
