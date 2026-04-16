@@ -49,4 +49,3 @@ spec:
       kind: Gateway
       jsonPointers:
         - /metadata/annotations
-        - /spec/listeners
