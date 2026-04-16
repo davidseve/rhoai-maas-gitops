@@ -1,6 +1,6 @@
-# Red Hat OpenShift AI - Models-as-a-Service (MaaS) Deployment
+# Red Hat OpenShift AI - Models-as-a-Service (MaaS) GitOps
 
-Helm charts for deploying RHOAI 3.3 with Models-as-a-Service on OpenShift 4.20+.
+GitOps deployment of RHOAI 3.3 with Models-as-a-Service on OpenShift 4.20+, managed by ArgoCD.
 
 Reference: [Official RHOAI 3.3 MaaS Documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.3/html-single/govern_llm_access_with_models-as-a-service/index)
 
@@ -9,7 +9,7 @@ Reference: [Official RHOAI 3.3 MaaS Documentation](https://docs.redhat.com/en/do
 - OpenShift 4.20 or later
 - Cluster admin access
 - `oc` CLI installed and logged in
-- `helm` CLI installed
+- OpenShift GitOps (ArgoCD) installed on the cluster
 
 ## Architecture
 
@@ -40,15 +40,33 @@ Reference: [Official RHOAI 3.3 MaaS Documentation](https://docs.redhat.com/en/do
      │                                └─────────────────────────────────────┘
 ```
 
-## Charts
+## Repository Structure
 
-| Chart | Description |
-|-------|-------------|
-| `charts/operators/` | Installs the 4 prerequisite operators |
-| `charts/maas-platform/` | DSC, Gateway, Route, and dashboard config |
-| `charts/maas-model/` | Model deployment + RBAC (per model) |
+```
+argocd/
+  app-of-apps.yaml          # Root Application — deploy this one
+  operators.yaml             # Child: operator subscriptions + CRs
+  maas-platform.yaml         # Child: DSCI, DSC, Gateway, Route, Dashboard
+  maas-model.yaml            # Child: model namespace + InferenceService
 
-## Step-by-Step Installation
+charts/
+  operators/                 # Helm chart — prerequisite operators
+  maas-platform/             # Helm chart — platform configuration
+  maas-model/                # Helm chart — model deployment
+```
+
+| ArgoCD Application | Chart | What it deploys |
+|---|---|---|
+| `maas-gitops` | `argocd/` (app-of-apps) | Creates the 3 child Applications below |
+| `maas-operators` | `charts/operators/` | RHOAI 3.3, Kuadrant, LeaderWorkerSet subscriptions + CRs |
+| `maas-platform` | `charts/maas-platform/` | DSCInitialization, DataScienceCluster, Gateway, Route, DashboardConfig |
+| `maas-model` | `charts/maas-model/` | Namespace, ServingRuntime, InferenceService (or LLMInferenceService) |
+
+---
+
+## Deployment with ArgoCD (recommended)
+
+A single command deploys everything. ArgoCD handles operator installation, CRD availability, namespace creation, and retry logic automatically.
 
 ### Step 1: Log in to the cluster
 
@@ -56,55 +74,128 @@ Reference: [Official RHOAI 3.3 MaaS Documentation](https://docs.redhat.com/en/do
 oc login -u <admin-user> <api-server-url>
 ```
 
-### Step 2: Determine your cluster domain
+### Step 2: Deploy
+
+```bash
+oc apply -f https://raw.githubusercontent.com/davidseve/rhoai-maas-gitops/main/argocd/app-of-apps.yaml
+```
+
+That's it. ArgoCD will:
+
+1. Create 3 child Applications (`maas-operators`, `maas-platform`, `maas-model`)
+2. Install the prerequisite operators (RHOAI, Kuadrant, LeaderWorkerSet)
+3. Wait for CRDs to become available (via retry with exponential backoff)
+4. Create the DSCInitialization, DataScienceCluster, Gateway, Route, and DashboardConfig
+5. Deploy the test model (TinyLlama on CPU with vLLM)
+
+### Step 3: Monitor progress
+
+```bash
+# Watch ArgoCD applications
+watch oc get applications -n openshift-gitops
+
+# Expected final state (after ~6 minutes):
+# maas-gitops      Synced   Healthy
+# maas-operators   Synced   Healthy
+# maas-platform    Synced   Healthy
+# maas-model       Synced   Healthy
+```
+
+### Step 4: Verify
 
 ```bash
 export CLUSTER_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
-echo $CLUSTER_DOMAIN
+
+# MaaS token
+curl -sSk \
+  -H "Authorization: Bearer $(oc whoami -t)" \
+  -H "Content-Type: application/json" \
+  -X POST -d '{"expiration":"10m"}' \
+  "https://maas.${CLUSTER_DOMAIN}/maas-api/v1/tokens" | python3 -m json.tool
 ```
 
-### Step 3: Install prerequisite operators
+### Timeline
+
+| Time | What happens |
+|------|-------------|
+| T+0s | `oc apply` of the app-of-apps |
+| T+30s | 4 ArgoCD Applications created, operators installing |
+| T+1m30s | Operators `Succeeded`, retries syncing CRs and platform |
+| T+3m | DSCI + DSC + Gateway + Route applied |
+| T+5m | DSC `Ready`, MaaS API running, model deploying |
+| T+6m | All apps `Synced + Healthy`, model responding |
+
+### Customizing for your cluster
+
+The `clusterDomain` is set in `argocd/maas-platform.yaml`. To use a different cluster, edit that file before applying:
+
+```yaml
+# argocd/maas-platform.yaml
+spec:
+  source:
+    helm:
+      parameters:
+        - name: clusterDomain
+          value: apps.your-cluster.example.com   # <-- change this
+```
+
+The Gateway TLS secret is configured in `charts/maas-platform/values.yaml`:
+
+```yaml
+gateway:
+  tlsSecretName: ingress-certs      # AWS clusters
+  # tlsSecretName: router-certs-default  # bare-metal clusters
+```
+
+---
+
+## Manual Deployment (without ArgoCD)
+
+If you prefer to deploy without ArgoCD, use `helm template` + `oc apply` directly.
+
+### Step 1: Log in and get cluster domain
+
+```bash
+oc login -u <admin-user> <api-server-url>
+export CLUSTER_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
+```
+
+### Step 2: Install prerequisite operators
 
 ```bash
 helm template operators charts/operators/ | oc apply -f -
 ```
 
-This installs four operators:
+This installs:
 
 | Operator | Package | Channel | Namespace |
 |----------|---------|---------|-----------|
 | Red Hat OpenShift AI 3.3 | `rhods-operator` | `fast-3.x` | `redhat-ods-operator` |
 | Red Hat Connectivity Link (Kuadrant) | `rhcl-operator` | `stable` | `kuadrant-system` |
-| cert-manager | (pre-installed) | `stable-v1` | `cert-manager-operator` |
 | LeaderWorkerSet | `leader-worker-set` | `stable-v1.0` | `leader-worker-set` |
 
-**Important:** The Kuadrant CR (`kuadrant.io/v1beta1/Kuadrant`) and the LeaderWorkerSet CR (`operator.openshift.io/v1/LeaderWorkerSetOperator`) require their CRDs to exist first. If the initial `oc apply` fails on these resources, wait for the operators to install and re-run the command:
+The Kuadrant CR and LeaderWorkerSet CR require their CRDs to exist first. If the initial apply fails on these resources, wait and re-run:
 
 ```bash
-# Wait for operators to be ready
+# Wait for operators
 oc get csv -n redhat-ods-operator | grep rhods     # Succeeded
 oc get csv -n kuadrant-system | grep rhcl          # Succeeded
 oc get csv -n leader-worker-set | grep leader      # Succeeded
 
-# Re-apply to create the CRs
+# Re-apply to create CRs
 helm template operators charts/operators/ | oc apply -f -
-```
 
-Wait for Kuadrant to become Ready:
-
-```bash
+# Wait for Kuadrant
 oc wait Kuadrant -n kuadrant-system kuadrant --for=condition=Ready --timeout=5m
 ```
 
-If Kuadrant shows `MissingDependency` (Gateway API provider not found), restart the Kuadrant operator pod after RHOAI finishes installing Istio:
+If Kuadrant shows `MissingDependency` (Gateway API provider), restart its pod after RHOAI finishes installing Istio:
 
 ```bash
 oc delete pod -n kuadrant-system -l app.kubernetes.io/name=kuadrant-operator
 ```
 
-### Step 4: Deploy MaaS platform
-
-The `maas-default-gateway` Gateway **must exist before** the DSC can enable MaaS. Install the full platform chart at once:
+### Step 3: Deploy MaaS platform
 
 ```bash
 helm template maas-platform charts/maas-platform/ \
@@ -112,80 +203,47 @@ helm template maas-platform charts/maas-platform/ \
   | oc apply -f -
 ```
 
-Wait for the DSC to be Ready:
+Wait for DSC to be Ready:
 
 ```bash
-# Check DSC status (may take 2-3 minutes)
 oc get datasciencecluster default-dsc -o jsonpath='{.status.phase}'
 # Expected: Ready
 
-# Verify MaaS is running
 oc get pods -n redhat-ods-applications -l app.kubernetes.io/name=maas-api
 # Expected: 1/1 Running
-
-# Verify tier configuration
-oc get configmap tier-to-group-mapping -n redhat-ods-applications
 ```
 
-### Step 5: Verify end-to-end connectivity
+### Step 4: Deploy a model
 
 ```bash
-# Get a MaaS token using your OpenShift credentials
+helm template tinyllama charts/maas-model/ | oc apply -f -
+```
+
+### Step 5: Verify
+
+```bash
 HOST="https://maas.${CLUSTER_DOMAIN}"
 
-TOKEN_RESPONSE=$(curl -sSk \
+curl -sSk \
   -H "Authorization: Bearer $(oc whoami -t)" \
   -H "Content-Type: application/json" \
   -X POST -d '{"expiration":"10m"}' \
-  "${HOST}/maas-api/v1/tokens")
-
-echo $TOKEN_RESPONSE | python3 -m json.tool
-```
-
-If this returns a JSON with a `token` field, the platform is working.
-
-### Step 6: Deploy a model
-
-Add the model namespace to the Gateway's allowed routes, then deploy:
-
-```bash
-# Allow the model namespace in the Gateway
-oc patch gateway maas-default-gateway -n openshift-ingress --type=json \
-  -p '[{"op":"add","path":"/spec/listeners/0/allowedRoutes/namespaces/selector/matchExpressions/0/values/-","value":"maas-models"}]'
-
-# CPU-only cluster (InferenceService mode)
-helm template tinyllama charts/maas-model/ | oc apply -f -
-
-# GPU cluster (LLMInferenceService mode, full MaaS integration)
-helm template tinyllama charts/maas-model/ \
-  --set mode=llminferenceservice \
-  --set rbac.enabled=true \
-  | oc apply -f -
-```
-
-Wait for the model to be ready:
-
-```bash
-# InferenceService mode
-oc wait inferenceservice tinyllama-test -n maas-models --for=condition=Ready --timeout=5m
-
-# LLMInferenceService mode
-oc wait llminferenceservice tinyllama-test -n maas-models --for=condition=Ready --timeout=5m
+  "${HOST}/maas-api/v1/tokens" | python3 -m json.tool
 ```
 
 ---
 
 ## Gateway and Route Configuration
 
-The MaaS Gateway needs to be exposed externally via an OpenShift Route. There are two TLS termination strategies, each with trade-offs. The chart supports both through `values.yaml`.
+The MaaS Gateway is exposed externally via an OpenShift Route. There are two TLS termination strategies.
 
 ### How TLS works in each mode
 
 ```
 PASSTHROUGH:
   Client ──TLS──► OpenShift Router ──TLS (same)──► Gateway (Istio/Envoy)
-  The router does NOT terminate TLS. It forwards the encrypted traffic
-  directly to the Gateway based on SNI (Server Name Indication).
+  The router does NOT terminate TLS. It forwards encrypted traffic
+  directly to the Gateway based on SNI.
   The Gateway's TLS certificate must match the external hostname.
 
 REENCRYPT:
@@ -197,53 +255,34 @@ REENCRYPT:
 
 ### Option A: Passthrough (default)
 
-The simplest configuration. TLS goes from the client directly to the Gateway. The OpenShift Router acts as a TCP proxy.
+TLS goes from the client directly to the Gateway. The OpenShift Router acts as a TCP proxy.
 
 **Requirements:**
-- The Gateway must use a TLS certificate that matches the external hostname `maas.<clusterDomain>`.
+- The Gateway must use a TLS certificate matching `maas.<clusterDomain>`.
 - This is typically the cluster's wildcard certificate (`*.apps.<clusterDomain>`).
 
-**Configuration:**
-
 ```yaml
-# values.yaml
 gateway:
-  tlsSecretName: ingress-certs     # AWS clusters
-  # tlsSecretName: router-certs-default  # bare-metal clusters
+  tlsSecretName: ingress-certs          # AWS
+  # tlsSecretName: router-certs-default # bare-metal
 
 route:
   tlsTermination: passthrough
 ```
 
-**Wildcard certificate secret name varies by platform:**
+**Wildcard certificate secret by platform:**
 
-| Platform | Secret name | Namespace | Notes |
-|----------|-------------|-----------|-------|
-| AWS (ROSA, IPI) | `ingress-certs` | `openshift-ingress` | Let's Encrypt or ACM cert |
-| Bare-metal / UPI | `router-certs-default` | `openshift-ingress` | Self-signed or custom CA |
-| Custom | Check your cluster | `openshift-ingress` | `oc get secret -n openshift-ingress \| grep tls` |
-
-**Pros:**
-- Simple configuration, no extra annotations needed.
-- Full end-to-end encryption with a single TLS session.
-- No certificate validation issues between Router and Gateway.
-
-**Cons:**
-- The Gateway cert must be the wildcard cert -- you need to know the secret name (varies by platform).
-- If the wildcard cert is managed/rotated externally, the Gateway picks up changes automatically only if the Secret is updated in place.
+| Platform | Secret name | Notes |
+|----------|-------------|-------|
+| AWS (ROSA, IPI) | `ingress-certs` | Let's Encrypt or ACM cert |
+| Bare-metal / UPI | `router-certs-default` | Self-signed or custom CA |
+| Custom | `oc get secret -n openshift-ingress \| grep tls` | Check your cluster |
 
 ### Option B: Reencrypt
 
-The OpenShift Router terminates the external TLS and establishes a new TLS connection to the Gateway. This is how the RHOAI `data-science-gateway` works out of the box.
-
-**Requirements:**
-- The Gateway uses a certificate signed by the OpenShift service-ca (internal CA).
-- The service-ca certificate is generated automatically by annotating the Gateway's Service.
-
-**Configuration:**
+The OpenShift Router terminates external TLS and establishes a new TLS connection to the Gateway using a service-ca certificate.
 
 ```yaml
-# values.yaml
 gateway:
   tlsSecretName: maas-gateway-service-tls
 
@@ -251,92 +290,42 @@ route:
   tlsTermination: reencrypt
 ```
 
-**Additional manual step** (must run after the Gateway Service is created):
+**Additional step** (after Gateway Service is created):
 
 ```bash
-# Annotate the Gateway Service to generate a service-ca certificate
 oc annotate svc maas-default-gateway-data-science-gateway-class \
   -n openshift-ingress \
   service.beta.openshift.io/serving-cert-secret-name=maas-gateway-service-tls
-
-# Verify the secret was created
-oc get secret maas-gateway-service-tls -n openshift-ingress
 ```
-
-The Route template automatically adds the `router.openshift.io/service-ca-certificate: "true"` annotation when `reencrypt` is selected, which tells the Router to trust the OpenShift service-ca for backend validation.
-
-**Pros:**
-- Works identically on AWS, bare-metal, and any other platform.
-- No need to know the wildcard certificate secret name.
-- The service-ca certificate is auto-generated and auto-rotated.
-
-**Cons:**
-- Requires the extra annotation step on the Service (not yet automatable in the Helm chart since the Service is created by the Gateway controller, not by Helm).
-- Two TLS sessions instead of one (negligible performance impact).
 
 ### Decision guide
 
-| Scenario | Recommended mode | Gateway cert | Why |
-|----------|-----------------|--------------|-----|
-| AWS / cloud with known wildcard cert | **passthrough** | `ingress-certs` | Simple, no extra steps |
-| Bare-metal with `router-certs-default` | **passthrough** | `router-certs-default` | Simple, no extra steps |
-| Unknown platform / multi-cluster GitOps | **reencrypt** | `maas-gateway-service-tls` | Platform-independent |
-| Wildcard cert name unknown | **reencrypt** | `maas-gateway-service-tls` | Avoids guessing the secret |
-
-### Switching between modes
-
-To switch from passthrough to reencrypt (or vice versa):
-
-```bash
-# 1. Delete the existing Route
-oc delete route maas-default-gateway -n openshift-ingress
-
-# 2. For reencrypt: annotate the service (skip for passthrough)
-oc annotate svc maas-default-gateway-data-science-gateway-class \
-  -n openshift-ingress \
-  service.beta.openshift.io/serving-cert-secret-name=maas-gateway-service-tls
-
-# 3. Update the Gateway certificate
-oc patch gateway maas-default-gateway -n openshift-ingress --type=json \
-  -p '[{"op":"replace","path":"/spec/listeners/0/tls/certificateRefs/0/name","value":"<new-secret-name>"}]'
-
-# 4. Re-apply the platform chart with new values
-helm template maas-platform charts/maas-platform/ \
-  --set clusterDomain=$CLUSTER_DOMAIN \
-  --set route.tlsTermination=reencrypt \
-  --set gateway.tlsSecretName=maas-gateway-service-tls \
-  | oc apply -f -
-```
+| Scenario | Mode | Gateway cert | Why |
+|----------|------|-------------|-----|
+| AWS with known wildcard cert | **passthrough** | `ingress-certs` | Simple, no extra steps |
+| Bare-metal with `router-certs-default` | **passthrough** | `router-certs-default` | Simple |
+| Unknown platform / multi-cluster | **reencrypt** | `maas-gateway-service-tls` | Platform-independent |
 
 ---
 
 ## Deploying a Model (`charts/maas-model`)
 
-The `maas-model` chart supports two modes controlled by `mode` in `values.yaml`:
+The `maas-model` chart supports two modes:
 
 | Mode | Runtime | GPU Required | MaaS Integration | Use case |
 |------|---------|--------------|-----------------|----------|
-| `inferenceservice` (default) | vLLM CPU | No | No (direct access) | CPU-only clusters, testing |
+| `inferenceservice` (default) | vLLM CPU | No | No | CPU-only clusters, testing |
 | `llminferenceservice` | llm-d (vLLM CUDA) | Yes | Yes (tiers, tokens, rate limits) | Production with GPUs |
 
-### Mode A: InferenceService (CPU, no MaaS tiers)
+### Mode A: InferenceService (CPU)
 
 ```bash
 helm template my-model charts/maas-model/ | oc apply -f -
 ```
 
-This deploys a vLLM CPU ServingRuntime + InferenceService with a passthrough Route for direct access. Authentication uses the OpenShift token (`oc whoami -t`), not MaaS tokens.
+Deploys a vLLM CPU ServingRuntime + InferenceService. The model is accessible internally within the cluster. Authentication uses `kube-rbac-proxy` with OpenShift tokens.
 
-```bash
-# Test the model
-CLUSTER_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
-curl -sSk "https://tinyllama-test.${CLUSTER_DOMAIN}/v1/chat/completions" \
-  -H "Authorization: Bearer $(oc whoami -t)" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"tinyllama-test","messages":[{"role":"user","content":"Hello"}],"max_tokens":20}'
-```
-
-### Mode B: LLMInferenceService (GPU, full MaaS integration)
+### Mode B: LLMInferenceService (GPU, full MaaS)
 
 ```bash
 helm template my-model charts/maas-model/ \
@@ -345,39 +334,11 @@ helm template my-model charts/maas-model/ \
   | oc apply -f -
 ```
 
-This deploys an LLMInferenceService with llm-d runtime, tier annotations, and RBAC for MaaS access. The model appears in the MaaS dashboard and supports tier-based tokens.
+Deploys an LLMInferenceService with llm-d runtime. The model registers in MaaS and supports tier-based access tokens.
 
-**Important:** The default llm-d runtime uses a CUDA (GPU) vLLM image. It will **not** work on CPU-only clusters.
-
-```bash
-# Test via MaaS
-CLUSTER_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
-HOST="https://maas.${CLUSTER_DOMAIN}"
-
-# Get a MaaS token
-TOKEN=$(curl -sSk -H "Authorization: Bearer $(oc whoami -t)" \
-  -H "Content-Type: application/json" -X POST -d '{"expiration":"10m"}' \
-  "${HOST}/maas-api/v1/tokens" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
-
-# Invoke the model through MaaS
-curl -sSk "${HOST}/maas-models/tinyllama-test/v1/chat/completions" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"tinyllama-test","messages":[{"role":"user","content":"Hello"}],"max_tokens":20}'
-```
-
-### Gateway namespace allowlist
-
-The MaaS Gateway only routes traffic to namespaces in its `allowedRoutes` list. You must add your model namespace:
-
-```bash
-oc patch gateway maas-default-gateway -n openshift-ingress --type=json \
-  -p '[{"op":"add","path":"/spec/listeners/0/allowedRoutes/namespaces/selector/matchExpressions/0/values/-","value":"maas-models"}]'
-```
+**Important:** The llm-d runtime uses a CUDA (GPU) image and will **not** work on CPU-only clusters.
 
 ### Customizing the model
-
-Override values to deploy a different model:
 
 ```bash
 helm template my-model charts/maas-model/ \
@@ -388,14 +349,34 @@ helm template my-model charts/maas-model/ \
   --set model.maxModelLen=4096 \
   --set resources.requests.cpu=4 \
   --set resources.requests.memory=8Gi \
-  --set resources.limits.cpu=16 \
-  --set resources.limits.memory=16Gi \
   | oc apply -f -
+```
+
+Add model namespaces to the Gateway via `charts/maas-platform/values.yaml`:
+
+```yaml
+gateway:
+  modelNamespaces:
+    - maas-models
+    - my-project
 ```
 
 ---
 
 ## Troubleshooting
+
+### ArgoCD app stuck in OutOfSync
+
+Check which resource is failing:
+
+```bash
+oc get application <app-name> -n openshift-gitops \
+  -o jsonpath='{.status.operationState.message}'
+```
+
+Common causes:
+- **CRD not yet installed**: The operator hasn't created the CRD yet. ArgoCD retries automatically (up to 30 attempts with exponential backoff).
+- **Namespace not found**: A resource targets a namespace that doesn't exist yet (e.g. `redhat-ods-applications` before DSC creates it). The `SkipDryRunOnMissingResource` sync option handles this.
 
 ### MaaS component not ready
 
@@ -403,57 +384,46 @@ helm template my-model charts/maas-model/ \
 oc get datasciencecluster default-dsc -o yaml | grep -A5 ModelsAsServiceReady
 ```
 
-Common causes:
-- **"gateway not found"**: The `maas-default-gateway` Gateway must exist in `openshift-ingress` before enabling MaaS in the DSC.
+- **"gateway not found"**: The `maas-default-gateway` must exist in `openshift-ingress` before enabling MaaS.
 - **"DeploymentsNotReady"**: Wait 2-3 minutes for the maas-api pod to start.
 
 ### Kuadrant not ready
 
 ```bash
-oc get kuadrant kuadrant -n kuadrant-system -o yaml | grep -A5 'type: Ready'
+oc get kuadrant kuadrant -n kuadrant-system -o jsonpath='{.status.conditions}'
 ```
 
-- **"MissingDependency" (Gateway API provider)**: RHOAI has not finished installing Istio yet. Wait for the RHOAI operator to finish, then restart the Kuadrant operator pod.
+- **"MissingDependency" (Gateway API provider)**: RHOAI has not finished installing Istio. Wait for RHOAI, then restart the Kuadrant operator pod.
 
 ### LeaderWorkerSet CRD missing
 
-If `LLMInferenceService` shows `ReconcileMultiNodeWorkloadError`:
+If `LLMInferenceService` shows `ReconcileMultiNodeWorkloadError`, the LWS operator needs its CR:
 
 ```bash
 oc get crd leaderworkersets.leaderworkerset.x-k8s.io
 ```
 
-The LWS operator requires a `LeaderWorkerSetOperator` CR to deploy the actual controller:
-
-```bash
-oc apply -f - <<EOF
-apiVersion: operator.openshift.io/v1
-kind: LeaderWorkerSetOperator
-metadata:
-  name: cluster
-spec:
-  managementState: Managed
-EOF
-```
+The `charts/operators/` chart includes the `LeaderWorkerSetOperator` CR. If it wasn't applied (CRD not ready on first pass), ArgoCD retries automatically.
 
 ### Route returns "Application is not available"
 
-The Route cannot reach the Gateway backend. Check:
-
 1. The Gateway Service exists: `oc get svc -n openshift-ingress | grep maas`
-2. For reencrypt: the service-ca cert exists: `oc get secret maas-gateway-service-tls -n openshift-ingress`
-3. For passthrough: the Gateway cert matches the wildcard: check `gateway.tlsSecretName` value
+2. For reencrypt: `oc get secret maas-gateway-service-tls -n openshift-ingress`
+3. For passthrough: verify `gateway.tlsSecretName` matches the wildcard cert
 
-### 401 Unauthorized on token generation
+### DSC schema errors
 
-Verify the AuthPolicy audiences:
+The DSC CRD has two API versions with **different field names**:
 
-```bash
-oc get authpolicy maas-api-auth-policy -n redhat-ods-applications \
-  -o jsonpath='{.spec.rules.authentication.openshift-identities.kubernetesTokenReview.audiences}'
-```
+| v1 field | v2 field |
+|----------|----------|
+| `datasciencepipelines` | `aipipelines` |
+| `modelmeshserving` | _(removed)_ |
+| `codeflare` | _(removed)_ |
+| _(none)_ | `mlflowoperator` |
+| _(none)_ | `trainer` |
 
-Should include both `https://kubernetes.default.svc` and `maas-default-gateway-sa`. In RHOAI 3.3.1, this is configured correctly by default.
+This chart uses `apiVersion: v2`. If you see "field not declared in schema", verify you're using the v2 field names.
 
 ---
 
@@ -464,5 +434,6 @@ Should include both `https://kubernetes.default.svc` and `maas-default-gateway-s
 | OpenShift | 4.20.8 |
 | RHOAI | 3.3.1 |
 | Red Hat Connectivity Link | 1.3.2 |
-| cert-manager | 1.18.1 |
+| cert-manager | 1.18.1 (pre-installed) |
 | LeaderWorkerSet | 1.0.0 |
+| OpenShift GitOps (ArgoCD) | 1.20.1 |
