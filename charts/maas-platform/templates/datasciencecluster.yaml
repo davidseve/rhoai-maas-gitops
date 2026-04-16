@@ -12,10 +12,16 @@ spec:
         managementState: {{ .Values.datasciencecluster.components.modelsAsService.managementState }}
     llamastackoperator:
       managementState: {{ .Values.datasciencecluster.components.llamastackoperator.managementState }}
+    codeflare:
+      managementState: {{ .Values.datasciencecluster.components.codeflare.managementState }}
+    datasciencepipelines:
+      managementState: {{ .Values.datasciencecluster.components.datasciencepipelines.managementState }}
     feastoperator:
       managementState: {{ .Values.datasciencecluster.components.feastoperator.managementState }}
     kueue:
       managementState: {{ .Values.datasciencecluster.components.kueue.managementState }}
+    modelmeshserving:
+      managementState: {{ .Values.datasciencecluster.components.modelmeshserving.managementState }}
     modelregistry:
       managementState: {{ .Values.datasciencecluster.components.modelregistry.managementState }}
     ray:

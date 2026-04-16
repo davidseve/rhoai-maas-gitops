@@ -13,9 +13,15 @@ datasciencecluster:
       managementState: Managed
     modelsAsService:
       managementState: Managed
+    codeflare:
+      managementState: Removed
+    datasciencepipelines:
+      managementState: Removed
     feastoperator:
       managementState: Removed
     kueue:
+      managementState: Removed
+    modelmeshserving:
       managementState: Removed
     modelregistry:
       managementState: Removed
