@@ -1,0 +1,64 @@
+# Cluster domain (e.g. apps.ocp.sandbox808.opentlc.com)
+# Required for Route host: maas.<clusterDomain>
+clusterDomain: ""
+
+datasciencecluster:
+  name: default-dsc
+  components:
+    dashboard:
+      managementState: Managed
+    kserve:
+      managementState: Managed
+    llamastackoperator:
+      managementState: Managed
+    modelsAsService:
+      managementState: Managed
+    aipipelines:
+      managementState: Removed
+    feastoperator:
+      managementState: Removed
+    kueue:
+      managementState: Removed
+    mlflowoperator:
+      managementState: Removed
+    modelregistry:
+      managementState: Removed
+    ray:
+      managementState: Removed
+    sparkoperator:
+      managementState: Removed
+    trainer:
+      managementState: Removed
+    trainingoperator:
+      managementState: Removed
+    trustyai:
+      managementState: Removed
+    workbenches:
+      managementState: Removed
+
+dashboard:
+  genAiStudio: true
+  modelAsService: true
+
+gateway:
+  enabled: true
+  name: maas-default-gateway
+  namespace: openshift-ingress
+  # TLS secret for the Gateway listener.
+  # passthrough mode (default): use the cluster wildcard cert
+  #   bare-metal: router-certs-default
+  #   AWS: ingress-certs
+  # reencrypt mode: use a service-ca generated cert
+  #   annotate the gateway svc with service.beta.openshift.io/serving-cert-secret-name
+  #   e.g. maas-gateway-service-tls
+  tlsSecretName: ingress-certs
+
+route:
+  enabled: true
+  name: maas-default-gateway
+  namespace: openshift-ingress
+  # passthrough (default): TLS goes directly from client to Gateway.
+  #   Requires gateway.tlsSecretName to be the wildcard cert for *.apps.<clusterDomain>.
+  # reencrypt: router terminates external TLS, re-encrypts to Gateway with service-ca cert.
+  #   Requires gateway.tlsSecretName to be a service-ca cert + annotation on the svc.
+  tlsTermination: passthrough

@@ -1,0 +1,36 @@
+{{- if eq .Values.mode "inferenceservice" }}
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: vllm-cpu
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    opendatahub.io/apiProtocol: REST
+    opendatahub.io/template-display-name: vLLM CPU Runtime
+    opendatahub.io/template-name: vllm-cpu
+  labels:
+    opendatahub.io/dashboard: "true"
+spec:
+  builtInAdapter:
+    modelLoadingTimeoutMillis: 90000
+  containers:
+  - args:
+    - --model
+    - /mnt/models
+    - --port
+    - "8080"
+    - --max-model-len
+    - {{ .Values.model.maxModelLen | quote }}
+    - --served-model-name
+    - {{ .Values.model.servedName }}
+    image: {{ .Values.images.vllmCpu.repository }}:{{ .Values.images.vllmCpu.tag }}
+    name: kserve-container
+    ports:
+    - containerPort: 8080
+      name: http1
+      protocol: TCP
+  multiModel: false
+  supportedModelFormats:
+  - autoSelect: true
+    name: vLLM
+{{- end }}

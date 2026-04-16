@@ -1,0 +1,54 @@
+global:
+  name: tinyllama-test
+  namespace: maas-models
+
+# Set to true to create the namespace
+namespace:
+  create: true
+
+model:
+  storageUri: "oci://quay.io/rh-aiservices-bu/tinyllama:1.0"
+  servedName: "tinyllama-test"
+  maxModelLen: 2048
+
+# CPU vLLM image (used by InferenceService mode)
+images:
+  vllmCpu:
+    repository: "quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9"
+    tag: "0.3"
+
+resources:
+  requests:
+    cpu: "2"
+    memory: "4Gi"
+  limits:
+    cpu: "8"
+    memory: "8Gi"
+
+# Mode: "inferenceservice" (CPU, classic KServe) or "llminferenceservice" (GPU, llm-d + MaaS)
+mode: inferenceservice
+
+# InferenceService settings (mode: inferenceservice)
+inferenceservice:
+  replicas: 1
+  route:
+    enabled: true
+
+# LLMInferenceService settings (mode: llminferenceservice)
+llminferenceservice:
+  replicas: 1
+  tiers:
+    - free
+    - premium
+    - enterprise
+  gateway:
+    name: maas-default-gateway
+    namespace: openshift-ingress
+
+# RBAC for MaaS tier access (only used with llminferenceservice mode)
+rbac:
+  enabled: false
+  tierGroups:
+    - system:serviceaccounts:maas-default-gateway-tier-free
+    - system:serviceaccounts:maas-default-gateway-tier-premium
+    - system:serviceaccounts:maas-default-gateway-tier-enterprise

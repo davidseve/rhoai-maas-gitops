@@ -1,0 +1,24 @@
+rhoai:
+  enabled: true
+  namespace: redhat-ods-operator
+  channel: fast-3.x
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+
+kuadrant:
+  enabled: true
+  namespace: kuadrant-system
+  channel: stable
+  package: rhcl-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+
+certManager:
+  enabled: false
+
+leaderWorkerSet:
+  enabled: true
+  namespace: leader-worker-set
+  channel: stable-v1.0
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace

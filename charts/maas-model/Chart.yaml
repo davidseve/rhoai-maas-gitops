@@ -1,0 +1,6 @@
+apiVersion: v2
+name: maas-model
+description: Deploy a CPU LLM model with vLLM (InferenceService) or llm-d (LLMInferenceService)
+type: application
+version: 0.1.0
+appVersion: "0.3"

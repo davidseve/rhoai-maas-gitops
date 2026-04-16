@@ -1,0 +1,49 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: maas-platform
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/davidseve/rhoai-maas-gitops.git
+    targetRevision: main
+    path: charts/maas-platform
+    helm:
+      parameters:
+        - name: clusterDomain
+          value: apps.ocp.sandbox808.opentlc.com
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m
+  ignoreDifferences:
+    - group: datasciencecluster.opendatahub.io
+      kind: DataScienceCluster
+      jsonPointers:
+        - /spec/components
+    - group: opendatahub.io
+      kind: OdhDashboardConfig
+      jsonPointers:
+        - /spec
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      jsonPointers:
+        - /metadata/annotations
+        - /spec/listeners

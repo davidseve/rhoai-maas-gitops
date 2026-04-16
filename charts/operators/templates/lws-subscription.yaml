@@ -1,0 +1,26 @@
+{{- if .Values.leaderWorkerSet.enabled }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.leaderWorkerSet.namespace }}
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: leader-worker-set
+  namespace: {{ .Values.leaderWorkerSet.namespace }}
+spec:
+  targetNamespaces:
+  - {{ .Values.leaderWorkerSet.namespace }}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: leader-worker-set
+  namespace: {{ .Values.leaderWorkerSet.namespace }}
+spec:
+  name: leader-worker-set
+  channel: {{ .Values.leaderWorkerSet.channel }}
+  source: {{ .Values.leaderWorkerSet.source }}
+  sourceNamespace: {{ .Values.leaderWorkerSet.sourceNamespace }}
+{{- end }}

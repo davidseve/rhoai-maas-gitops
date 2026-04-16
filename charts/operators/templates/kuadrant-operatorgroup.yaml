@@ -1,0 +1,7 @@
+{{- if .Values.kuadrant.enabled }}
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: kuadrant-operator
+  namespace: {{ .Values.kuadrant.namespace }}
+{{- end }}

@@ -1,0 +1,25 @@
+{{- if .Values.route.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ .Values.route.name }}
+  namespace: {{ .Values.route.namespace }}
+  {{- if eq .Values.route.tlsTermination "reencrypt" }}
+  annotations:
+    router.openshift.io/service-ca-certificate: "true"
+  {{- end }}
+spec:
+  host: maas.{{ required "clusterDomain is required" .Values.clusterDomain }}
+  port:
+    targetPort: 443
+  tls:
+    termination: {{ .Values.route.tlsTermination }}
+    {{- if eq .Values.route.tlsTermination "reencrypt" }}
+    insecureEdgeTerminationPolicy: Redirect
+    {{- end }}
+  to:
+    kind: Service
+    name: {{ .Values.gateway.name }}-data-science-gateway-class
+    weight: 100
+  wildcardPolicy: None
+{{- end }}
