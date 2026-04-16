@@ -12,20 +12,20 @@ spec:
         managementState: {{ .Values.datasciencecluster.components.modelsAsService.managementState }}
     llamastackoperator:
       managementState: {{ .Values.datasciencecluster.components.llamastackoperator.managementState }}
-    codeflare:
-      managementState: {{ .Values.datasciencecluster.components.codeflare.managementState }}
-    datasciencepipelines:
-      managementState: {{ .Values.datasciencecluster.components.datasciencepipelines.managementState }}
+    aipipelines:
+      managementState: {{ .Values.datasciencecluster.components.aipipelines.managementState }}
     feastoperator:
       managementState: {{ .Values.datasciencecluster.components.feastoperator.managementState }}
     kueue:
       managementState: {{ .Values.datasciencecluster.components.kueue.managementState }}
-    modelmeshserving:
-      managementState: {{ .Values.datasciencecluster.components.modelmeshserving.managementState }}
+    mlflowoperator:
+      managementState: {{ .Values.datasciencecluster.components.mlflowoperator.managementState }}
     modelregistry:
       managementState: {{ .Values.datasciencecluster.components.modelregistry.managementState }}
     ray:
       managementState: {{ .Values.datasciencecluster.components.ray.managementState }}
+    trainer:
+      managementState: {{ .Values.datasciencecluster.components.trainer.managementState }}
     trainingoperator:
       managementState: {{ .Values.datasciencecluster.components.trainingoperator.managementState }}
     trustyai:
