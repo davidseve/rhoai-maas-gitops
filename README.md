@@ -34,7 +34,7 @@ Reference: [Official RHOAI 3.3 MaaS Documentation](https://docs.redhat.com/en/do
      │                                │     │                   │          │
      │                                │  ┌──▼──────┐    ┌──────▼───────┐  │
      │                                │  │ MaaS API │    │  Model Pod   │  │
-     │                                │  │ (tokens, │    │  (vLLM/llm-d)│  │
+     │                                │  │ (tokens, │    │  (vLLM CPU)  │  │
      │                                │  │  tiers)  │    │              │  │
      │                                │  └──────────┘    └──────────────┘  │
      │                                └─────────────────────────────────────┘
@@ -45,9 +45,9 @@ Reference: [Official RHOAI 3.3 MaaS Documentation](https://docs.redhat.com/en/do
 ```
 argocd/
   app-of-apps.yaml          # Root Application — deploy this one
-  operators.yaml             # Child: operator subscriptions + CRs
-  maas-platform.yaml         # Child: DSCI, DSC, Gateway, Route, Dashboard
-  maas-model.yaml            # Child: model namespace + InferenceService
+  operators.yaml             # Wave 0: operator subscriptions + CRs
+  maas-platform.yaml         # Wave 1: DSCI, DSC, Gateway, Route, Dashboard
+  maas-model.yaml            # Wave 2: LLMInferenceService, RBAC, AuthPolicy
 
 charts/
   operators/                 # Helm chart — prerequisite operators
@@ -55,12 +55,14 @@ charts/
   maas-model/                # Helm chart — model deployment
 ```
 
-| ArgoCD Application | Chart | What it deploys |
-|---|---|---|
-| `maas-gitops` | `argocd/` (app-of-apps) | Creates the 3 child Applications below |
-| `maas-operators` | `charts/operators/` | RHOAI 3.3, Kuadrant, LeaderWorkerSet subscriptions + CRs |
-| `maas-platform` | `charts/maas-platform/` | DSCInitialization, DataScienceCluster, Gateway, Route, DashboardConfig |
-| `maas-model` | `charts/maas-model/` | Namespace, ServingRuntime, InferenceService (or LLMInferenceService) |
+| ArgoCD Application | Wave | Chart | What it deploys |
+|---|---|---|---|
+| `maas-gitops` | — | `argocd/` (app-of-apps) | Creates the 3 child Applications below |
+| `maas-operators` | 0 | `charts/operators/` | RHOAI 3.3, Kuadrant, LeaderWorkerSet subscriptions + CRs |
+| `maas-platform` | 1 | `charts/maas-platform/` | DSCInitialization, DataScienceCluster, Gateway, Route, DashboardConfig |
+| `maas-model` | 2 | `charts/maas-model/` | Namespace, LLMInferenceService, RBAC, AuthPolicy fix |
+
+Sync-waves ensure ordered deployment: operators install first (wave 0), then platform resources that depend on operator CRDs (wave 1), then the model that depends on KServe and the Gateway (wave 2).
 
 ---
 
@@ -74,63 +76,11 @@ A single command deploys everything. ArgoCD handles operator installation, CRD a
 oc login -u <admin-user> <api-server-url>
 ```
 
-### Step 2: Deploy
+### Step 2: Update cluster domain
 
-```bash
-oc apply -f https://raw.githubusercontent.com/davidseve/rhoai-maas-gitops/main/argocd/app-of-apps.yaml
-```
-
-That's it. ArgoCD will:
-
-1. Create 3 child Applications (`maas-operators`, `maas-platform`, `maas-model`)
-2. Install the prerequisite operators (RHOAI, Kuadrant, LeaderWorkerSet)
-3. Wait for CRDs to become available (via retry with exponential backoff)
-4. Create the DSCInitialization, DataScienceCluster, Gateway, Route, and DashboardConfig
-5. Deploy the test model (TinyLlama on CPU with vLLM)
-
-### Step 3: Monitor progress
-
-```bash
-# Watch ArgoCD applications
-watch oc get applications -n openshift-gitops
-
-# Expected final state (after ~6 minutes):
-# maas-gitops      Synced   Healthy
-# maas-operators   Synced   Healthy
-# maas-platform    Synced   Healthy
-# maas-model       Synced   Healthy
-```
-
-### Step 4: Verify
-
-```bash
-export CLUSTER_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
-
-# MaaS token
-curl -sSk \
-  -H "Authorization: Bearer $(oc whoami -t)" \
-  -H "Content-Type: application/json" \
-  -X POST -d '{"expiration":"10m"}' \
-  "https://maas.${CLUSTER_DOMAIN}/maas-api/v1/tokens" | python3 -m json.tool
-```
-
-### Timeline
-
-| Time | What happens |
-|------|-------------|
-| T+0s | `oc apply` of the app-of-apps |
-| T+30s | 4 ArgoCD Applications created, operators installing |
-| T+1m30s | Operators `Succeeded`, retries syncing CRs and platform |
-| T+3m | DSCI + DSC + Gateway + Route applied |
-| T+5m | DSC `Ready`, MaaS API running, model deploying |
-| T+6m | All apps `Synced + Healthy`, model responding |
-
-### Customizing for your cluster
-
-The `clusterDomain` is set in `argocd/maas-platform.yaml`. To use a different cluster, edit that file before applying:
+Edit `argocd/maas-platform.yaml` and set your cluster domain:
 
 ```yaml
-# argocd/maas-platform.yaml
 spec:
   source:
     helm:
@@ -139,96 +89,178 @@ spec:
           value: apps.your-cluster.example.com   # <-- change this
 ```
 
-The Gateway TLS secret is configured in `charts/maas-platform/values.yaml`:
-
-```yaml
-gateway:
-  tlsSecretName: ingress-certs      # AWS clusters
-  # tlsSecretName: router-certs-default  # bare-metal clusters
-```
-
----
-
-## Manual Deployment (without ArgoCD)
-
-If you prefer to deploy without ArgoCD, use `helm template` + `oc apply` directly.
-
-### Step 1: Log in and get cluster domain
+### Step 3: Deploy
 
 ```bash
-oc login -u <admin-user> <api-server-url>
-export CLUSTER_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
+oc apply -f https://raw.githubusercontent.com/davidseve/rhoai-maas-gitops/main/argocd/app-of-apps.yaml
 ```
 
-### Step 2: Install prerequisite operators
+That's it. ArgoCD will:
+
+1. Create 3 child Applications in wave order (0 → 1 → 2)
+2. **Wave 0:** Install RHOAI, Kuadrant, and LeaderWorkerSet operators; wait for CRDs; create operator CRs
+3. **Wave 1:** Create DSCInitialization, DataScienceCluster, Gateway, Route, and DashboardConfig
+4. **Wave 2:** Create the model namespace, deploy LLMInferenceService with CPU vLLM, configure RBAC and fix the AuthPolicy audience
+
+### Step 4: Monitor progress
 
 ```bash
-helm template operators charts/operators/ | oc apply -f -
-```
+watch oc get applications.argoproj.io -n openshift-gitops
 
-This installs:
-
-| Operator | Package | Channel | Namespace |
-|----------|---------|---------|-----------|
-| Red Hat OpenShift AI 3.3 | `rhods-operator` | `fast-3.x` | `redhat-ods-operator` |
-| Red Hat Connectivity Link (Kuadrant) | `rhcl-operator` | `stable` | `kuadrant-system` |
-| LeaderWorkerSet | `leader-worker-set` | `stable-v1.0` | `leader-worker-set` |
-
-The Kuadrant CR and LeaderWorkerSet CR require their CRDs to exist first. If the initial apply fails on these resources, wait and re-run:
-
-```bash
-# Wait for operators
-oc get csv -n redhat-ods-operator | grep rhods     # Succeeded
-oc get csv -n kuadrant-system | grep rhcl          # Succeeded
-oc get csv -n leader-worker-set | grep leader      # Succeeded
-
-# Re-apply to create CRs
-helm template operators charts/operators/ | oc apply -f -
-
-# Wait for Kuadrant
-oc wait Kuadrant -n kuadrant-system kuadrant --for=condition=Ready --timeout=5m
-```
-
-If Kuadrant shows `MissingDependency` (Gateway API provider), restart its pod after RHOAI finishes installing Istio:
-
-```bash
-oc delete pod -n kuadrant-system -l app.kubernetes.io/name=kuadrant-operator
-```
-
-### Step 3: Deploy MaaS platform
-
-```bash
-helm template maas-platform charts/maas-platform/ \
-  --set clusterDomain=$CLUSTER_DOMAIN \
-  | oc apply -f -
-```
-
-Wait for DSC to be Ready:
-
-```bash
-oc get datasciencecluster default-dsc -o jsonpath='{.status.phase}'
-# Expected: Ready
-
-oc get pods -n redhat-ods-applications -l app.kubernetes.io/name=maas-api
-# Expected: 1/1 Running
-```
-
-### Step 4: Deploy a model
-
-```bash
-helm template tinyllama charts/maas-model/ | oc apply -f -
+# Expected final state (after ~3-5 minutes):
+# maas-gitops      Synced   Healthy
+# maas-operators   Synced   Healthy
+# maas-platform    Synced   Healthy
+# maas-model       Synced   Healthy
 ```
 
 ### Step 5: Verify
 
 ```bash
-HOST="https://maas.${CLUSTER_DOMAIN}"
+# Check the model is ready
+oc get llminferenceservice -n maas-models
+# NAME             READY   REASON
+# tinyllama-test   True
 
-curl -sSk \
+# Check the pod is running
+oc get pods -n maas-models
+# tinyllama-test-kserve-...   2/2   Running
+```
+
+### Step 6: Test MaaS token + inference
+
+```bash
+MAAS_HOST="maas.$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')"
+
+# Generate a MaaS token (10 min expiry)
+MAAS_TOKEN=$(curl -sk \
+  -X POST "https://$MAAS_HOST/maas-api/v1/tokens" \
   -H "Authorization: Bearer $(oc whoami -t)" \
   -H "Content-Type: application/json" \
-  -X POST -d '{"expiration":"10m"}' \
-  "${HOST}/maas-api/v1/tokens" | python3 -m json.tool
+  -d '{"expiration":"10m"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+# Inference with the MaaS token
+curl -sk "https://$MAAS_HOST/maas-models/tinyllama-test/v1/chat/completions" \
+  -H "Authorization: Bearer $MAAS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"tinyllama-test","messages":[{"role":"user","content":"What is OpenShift?"}],"max_tokens":50}' \
+  | python3 -m json.tool
+```
+
+### Timeline
+
+| Time | What happens |
+|------|-------------|
+| T+0s | `oc apply` of the app-of-apps |
+| T+30s | Wave 0: operator namespaces and subscriptions created |
+| T+1m30s | Wave 0: operators installed, CRs created (Kuadrant, LWS) |
+| T+2m | Wave 1: DSCI + DSC + Gateway + Route applied |
+| T+3m | Wave 2: LLMInferenceService + RBAC + AuthPolicy applied |
+| T+3-5m | All apps `Synced + Healthy`, model responding |
+
+---
+
+## What the model chart deploys
+
+The `maas-model` chart (`charts/maas-model/`) deploys a complete MaaS-integrated model using `LLMInferenceService`. This is the KServe CRD that provides native MaaS integration with tier-based access, token authentication, and Gateway routing.
+
+### Resources created
+
+| Resource | Name | Purpose |
+|---|---|---|
+| `Namespace` | `maas-models` | Dedicated namespace for model workloads |
+| `LLMInferenceService` | `tinyllama-test` | Model deployment with CPU vLLM, registered in MaaS |
+| `Role` | `tinyllama-test-maas-access` | Allows `get` + `post` on the LLMInferenceService |
+| `RoleBinding` | `tinyllama-test-maas-access` | Binds the role to tier ServiceAccount groups |
+| `AuthPolicy` | `maas-default-gateway-authn` | Fixes the audience list for MaaS token authentication |
+
+### CPU vLLM override
+
+The default `LLMInferenceService` runtime (`llm-d`) uses a GPU (CUDA) image. For CPU-only clusters, the chart overrides the container image and entrypoint:
+
+```yaml
+template:
+  containers:
+  - name: main
+    image: quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9:0.3
+    command: [python, -m, vllm.entrypoints.openai.api_server]
+    args:
+    - --model
+    - /mnt/models
+    - --port
+    - "8000"
+    - --ssl-certfile
+    - /var/run/kserve/tls/tls.crt
+    - --ssl-keyfile
+    - /var/run/kserve/tls/tls.key
+    - --max-model-len
+    - "2048"
+    - --served-model-name
+    - tinyllama-test
+```
+
+Key details:
+- **`command` override**: The CPU image has `ENTRYPOINT ["/bin/bash", "-c"]`, so we must set `command` explicitly to invoke vLLM directly.
+- **TLS args**: KServe injects HTTPS readiness/liveness probes. vLLM must serve TLS using the certificates mounted at `/var/run/kserve/tls/` by the KServe operator.
+
+### AuthPolicy audience fix
+
+The `odh-model-controller` creates two AuthPolicies automatically when a Gateway + LLMInferenceService exist:
+
+| AuthPolicy | Namespace | Created with correct audiences? |
+|---|---|---|
+| `maas-api-auth-policy` | `redhat-ods-applications` | Yes — includes both `https://kubernetes.default.svc` and `maas-default-gateway-sa` |
+| `maas-default-gateway-authn` | `openshift-ingress` | **No** — only includes `https://kubernetes.default.svc` |
+
+MaaS tokens are issued with audience `maas-default-gateway-sa`. Without this audience in the Gateway AuthPolicy, inference requests with MaaS tokens return `401 Unauthorized`.
+
+The chart includes `authpolicy-patch.yaml` which declares `maas-default-gateway-authn` with both audiences. ArgoCD applies it via `ServerSideApply`, overriding the incomplete version created by the operator. With `selfHeal: true`, if the operator reverts the change, ArgoCD will re-apply the fix.
+
+### RBAC for tier access
+
+The operator auto-creates a Role with only the `post` verb, but the Gateway AuthPolicy checks `get` access via `kubernetesSubjectAccessReview`. The chart creates a Role with both `get` and `post` verbs, bound to the tier ServiceAccount groups:
+
+- `system:serviceaccounts:maas-default-gateway-tier-free`
+- `system:serviceaccounts:maas-default-gateway-tier-premium`
+- `system:serviceaccounts:maas-default-gateway-tier-enterprise`
+
+### Customizing the model
+
+Edit `charts/maas-model/values.yaml`:
+
+```yaml
+global:
+  name: my-llama              # Model name
+  namespace: my-project        # Target namespace
+
+model:
+  storageUri: "oci://quay.io/my-org/my-model:v1"
+  servedName: my-llama
+  maxModelLen: 4096
+
+images:
+  vllm:
+    repository: "quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9"
+    tag: "0.3"
+
+resources:
+  requests:
+    cpu: "4"
+    memory: "8Gi"
+  limits:
+    cpu: "16"
+    memory: "16Gi"
+```
+
+For GPU clusters, change the image to a CUDA-based vLLM and remove the `command` override in the template.
+
+Add the model namespace to the Gateway's allowed routes in `charts/maas-platform/values.yaml`:
+
+```yaml
+gateway:
+  modelNamespaces:
+    - maas-models
+    - my-project
 ```
 
 ---
@@ -308,57 +340,93 @@ oc annotate svc maas-default-gateway-data-science-gateway-class \
 
 ---
 
-## Deploying a Model (`charts/maas-model`)
+## Manual Deployment (without ArgoCD)
 
-The `maas-model` chart supports two modes:
+If you prefer to deploy without ArgoCD, use `helm template` + `oc apply` directly.
 
-| Mode | Runtime | GPU Required | MaaS Integration | Use case |
-|------|---------|--------------|-----------------|----------|
-| `inferenceservice` (default) | vLLM CPU | No | No | CPU-only clusters, testing |
-| `llminferenceservice` | llm-d (vLLM CUDA) | Yes | Yes (tiers, tokens, rate limits) | Production with GPUs |
-
-### Mode A: InferenceService (CPU)
+### Step 1: Log in and get cluster domain
 
 ```bash
-helm template my-model charts/maas-model/ | oc apply -f -
+oc login -u <admin-user> <api-server-url>
+export CLUSTER_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
 ```
 
-Deploys a vLLM CPU ServingRuntime + InferenceService. The model is accessible internally within the cluster. Authentication uses `kube-rbac-proxy` with OpenShift tokens.
-
-### Mode B: LLMInferenceService (GPU, full MaaS)
+### Step 2: Install prerequisite operators
 
 ```bash
-helm template my-model charts/maas-model/ \
-  --set mode=llminferenceservice \
-  --set rbac.enabled=true \
+helm template operators charts/operators/ | oc apply -f -
+```
+
+This installs:
+
+| Operator | Package | Channel | Namespace |
+|----------|---------|---------|-----------|
+| Red Hat OpenShift AI 3.3 | `rhods-operator` | `fast-3.x` | `redhat-ods-operator` |
+| Red Hat Connectivity Link (Kuadrant) | `rhcl-operator` | `stable` | `kuadrant-system` |
+| LeaderWorkerSet | `leader-worker-set` | `stable-v1.0` | `leader-worker-set` |
+
+The Kuadrant CR and LeaderWorkerSet CR require their CRDs to exist first. If the initial apply fails on these resources, wait and re-run:
+
+```bash
+# Wait for operators
+oc get csv -n redhat-ods-operator | grep rhods     # Succeeded
+oc get csv -n kuadrant-system | grep rhcl          # Succeeded
+oc get csv -n leader-worker-set | grep leader      # Succeeded
+
+# Re-apply to create CRs
+helm template operators charts/operators/ | oc apply -f -
+```
+
+If Kuadrant shows `MissingDependency` (Gateway API provider), restart its pod after RHOAI finishes installing Istio:
+
+```bash
+oc delete pod -n kuadrant-system -l control-plane=controller-manager -l app=kuadrant
+```
+
+### Step 3: Deploy MaaS platform
+
+```bash
+helm template maas-platform charts/maas-platform/ \
+  --set clusterDomain=$CLUSTER_DOMAIN \
   | oc apply -f -
 ```
 
-Deploys an LLMInferenceService with llm-d runtime. The model registers in MaaS and supports tier-based access tokens.
-
-**Important:** The llm-d runtime uses a CUDA (GPU) image and will **not** work on CPU-only clusters.
-
-### Customizing the model
+Wait for DSC to be Ready:
 
 ```bash
-helm template my-model charts/maas-model/ \
-  --set global.name=my-llama \
-  --set global.namespace=my-project \
-  --set model.storageUri="oci://quay.io/my-org/my-model:v1" \
-  --set model.servedName=my-llama \
-  --set model.maxModelLen=4096 \
-  --set resources.requests.cpu=4 \
-  --set resources.requests.memory=8Gi \
-  | oc apply -f -
+oc get datasciencecluster default-dsc -o jsonpath='{.status.phase}'
+# Expected: Ready
 ```
 
-Add model namespaces to the Gateway via `charts/maas-platform/values.yaml`:
+### Step 4: Deploy a model
 
-```yaml
-gateway:
-  modelNamespaces:
-    - maas-models
-    - my-project
+```bash
+helm template tinyllama charts/maas-model/ | oc apply -f -
+```
+
+### Step 5: Patch AuthPolicy (manual only)
+
+When deploying without ArgoCD, you must manually fix the AuthPolicy audience:
+
+```bash
+oc patch authpolicy maas-default-gateway-authn -n openshift-ingress \
+  --type=merge -p '{"spec":{"rules":{"authentication":{"kubernetes-user":{"kubernetesTokenReview":{"audiences":["https://kubernetes.default.svc","maas-default-gateway-sa"]}}}}}}'
+```
+
+This is needed because the `odh-model-controller` creates this AuthPolicy with only one audience (`https://kubernetes.default.svc`), but MaaS tokens use audience `maas-default-gateway-sa`. Without this patch, inference with MaaS tokens returns `401`.
+
+> **Note:** With ArgoCD deployment, this fix is applied automatically by the `authpolicy-patch.yaml` template in the model chart.
+
+### Step 6: Verify
+
+```bash
+MAAS_HOST="maas.${CLUSTER_DOMAIN}"
+
+# Generate token
+curl -sk -X POST "https://$MAAS_HOST/maas-api/v1/tokens" \
+  -H "Authorization: Bearer $(oc whoami -t)" \
+  -H "Content-Type: application/json" \
+  -d '{"expiration":"10m"}' | python3 -m json.tool
 ```
 
 ---
@@ -375,41 +443,76 @@ oc get application <app-name> -n openshift-gitops \
 ```
 
 Common causes:
-- **CRD not yet installed**: The operator hasn't created the CRD yet. ArgoCD retries automatically (up to 30 attempts with exponential backoff).
+- **CRD not yet installed**: The operator hasn't created the CRD yet. ArgoCD retries automatically (up to 10–30 attempts with exponential backoff).
 - **Namespace not found**: A resource targets a namespace that doesn't exist yet (e.g. `redhat-ods-applications` before DSC creates it). The `SkipDryRunOnMissingResource` sync option handles this.
-
-### MaaS component not ready
-
-```bash
-oc get datasciencecluster default-dsc -o yaml | grep -A5 ModelsAsServiceReady
-```
-
-- **"gateway not found"**: The `maas-default-gateway` must exist in `openshift-ingress` before enabling MaaS.
-- **"DeploymentsNotReady"**: Wait 2-3 minutes for the maas-api pod to start.
-
-### Kuadrant not ready
+- **Stuck retry with old revision**: If a new git push doesn't take effect because ArgoCD is still retrying the old revision, clear the operation and force refresh:
 
 ```bash
-oc get kuadrant kuadrant -n kuadrant-system -o jsonpath='{.status.conditions}'
+oc patch applications.argoproj.io <app-name> -n openshift-gitops --type merge -p '{"operation": null}'
+oc annotate applications.argoproj.io <app-name> -n openshift-gitops argocd.argoproj.io/refresh=hard --overwrite
 ```
 
-- **"MissingDependency" (Gateway API provider)**: RHOAI has not finished installing Istio. Wait for RHOAI, then restart the Kuadrant operator pod.
+### MaaS token returns 401 on inference
 
-### LeaderWorkerSet CRD missing
-
-If `LLMInferenceService` shows `ReconcileMultiNodeWorkloadError`, the LWS operator needs its CR:
+The AuthPolicy `maas-default-gateway-authn` may be missing the `maas-default-gateway-sa` audience. Verify:
 
 ```bash
-oc get crd leaderworkersets.leaderworkerset.x-k8s.io
+oc get authpolicy maas-default-gateway-authn -n openshift-ingress \
+  -o jsonpath='{.spec.rules.authentication.kubernetes-user.kubernetesTokenReview.audiences}'
+# Expected: ["https://kubernetes.default.svc","maas-default-gateway-sa"]
 ```
 
-The `charts/operators/` chart includes the `LeaderWorkerSetOperator` CR. If it wasn't applied (CRD not ready on first pass), ArgoCD retries automatically.
+If the audience is missing, patch it:
 
-### Route returns "Application is not available"
+```bash
+oc patch authpolicy maas-default-gateway-authn -n openshift-ingress \
+  --type=merge -p '{"spec":{"rules":{"authentication":{"kubernetes-user":{"kubernetesTokenReview":{"audiences":["https://kubernetes.default.svc","maas-default-gateway-sa"]}}}}}}'
+```
 
-1. The Gateway Service exists: `oc get svc -n openshift-ingress | grep maas`
-2. For reencrypt: `oc get secret maas-gateway-service-tls -n openshift-ingress`
-3. For passthrough: verify `gateway.tlsSecretName` matches the wildcard cert
+With ArgoCD, the `authpolicy-patch.yaml` template applies this fix automatically. If the operator reverts it, ArgoCD's `selfHeal` will re-apply.
+
+### MaaS token returns 403 on inference
+
+The tier ServiceAccount lacks `get` permission on the LLMInferenceService. Verify:
+
+```bash
+oc get role -n maas-models | grep maas-access
+# Expected: tinyllama-test-maas-access (with get + post verbs)
+```
+
+The operator creates a Role with only `post`, but the AuthPolicy authorization checks `get`. The chart's `rbac.yaml` creates a Role with both verbs.
+
+### Kuadrant AuthPolicy shows MissingDependency
+
+```bash
+oc get authpolicy -n openshift-ingress -o jsonpath='{range .items[*]}{.metadata.name}: {.status.conditions[0].reason}{"\n"}{end}'
+```
+
+If it shows `MissingDependency` for "Gateway API provider (istio / envoy gateway)", the RHOAI operator hasn't finished deploying Istio. Wait for the DSC to be `Ready`, then restart the Kuadrant operator:
+
+```bash
+oc delete pod -n kuadrant-system -l control-plane=controller-manager -l app=kuadrant
+```
+
+### vLLM pod CrashLoopBackOff with "invalid option"
+
+The CPU vLLM image (`vllm-cpu-openai-ubi9`) has `ENTRYPOINT ["/bin/bash", "-c"]`. If `command` is not overridden, the `args` are passed to `bash -c` as flags, producing:
+
+```
+/bin/bash: --: invalid option
+```
+
+The fix is to set `command: [python, -m, vllm.entrypoints.openai.api_server]` in the container spec. This is already done in the chart.
+
+### vLLM pod stuck at 1/2 Ready
+
+KServe injects HTTPS readiness probes (`https://:8000/health`), but vLLM serves plain HTTP by default. The logs show:
+
+```
+http: server gave HTTP response to HTTPS client
+```
+
+The fix is to add `--ssl-certfile` and `--ssl-keyfile` args pointing to the KServe-mounted TLS certs at `/var/run/kserve/tls/`. This is already done in the chart.
 
 ### DSC schema errors
 
