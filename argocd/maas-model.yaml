@@ -22,19 +22,16 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
       - RespectIgnoreDifferences=true
+      - SkipDryRunOnMissingResource=true
     retry:
-      limit: 10
+      limit: 30
       backoff:
-        duration: 30s
+        duration: 15s
         factor: 2
-        maxDuration: 10m
+        maxDuration: 15m
   ignoreDifferences:
     - group: serving.kserve.io
-      kind: InferenceService
+      kind: LLMInferenceService
       jsonPointers:
         - /metadata/annotations
-        - /spec/predictor/model/resources
-    - group: serving.kserve.io
-      kind: ServingRuntime
-      jsonPointers:
-        - /metadata/annotations
+        - /spec
