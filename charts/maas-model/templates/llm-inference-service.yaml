@@ -21,6 +21,10 @@ spec:
     containers:
     - name: main
       image: {{ .Values.images.vllm.repository }}:{{ .Values.images.vllm.tag }}
+      command:
+      - python
+      - -m
+      - vllm.entrypoints.openai.api_server
       args:
       - --model
       - /mnt/models
