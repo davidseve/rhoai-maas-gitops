@@ -34,6 +34,10 @@ spec:
       - {{ .Values.model.maxModelLen | quote }}
       - --served-model-name
       - {{ .Values.model.servedName }}
+      - --ssl-certfile
+      - /var/run/kserve/tls/tls.crt
+      - --ssl-keyfile
+      - /var/run/kserve/tls/tls.key
       resources:
         limits:
           cpu: {{ .Values.resources.limits.cpu | quote }}
