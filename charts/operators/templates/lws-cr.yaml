@@ -3,6 +3,9 @@ apiVersion: operator.openshift.io/v1
 kind: LeaderWorkerSetOperator
 metadata:
   name: cluster
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   managementState: Managed
 {{- end }}
