@@ -12,7 +12,7 @@ spec:
     helm:
       parameters:
         - name: clusterDomain
-          value: apps.ocp.sandbox808.opentlc.com
+          value: apps.ocp.sandbox6.opentlc.com
       valueFiles:
         - values.yaml
   destination:
