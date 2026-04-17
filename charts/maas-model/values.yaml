@@ -2,6 +2,8 @@ global:
   name: tinyllama-test
   namespace: maas-models
 
+mode: llminferenceservice
+
 namespace:
   create: true
 
