@@ -1,0 +1,19 @@
+{{- range .Values.tiers }}
+{{- range .groups }}
+{{- if ne .name "system:authenticated" }}
+---
+apiVersion: user.openshift.io/v1
+kind: Group
+metadata:
+  name: {{ .name }}
+users:
+{{- if .users }}
+{{- range .users }}
+  - {{ . }}
+{{- end }}
+{{- else }}
+  []
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

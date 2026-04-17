@@ -1,0 +1,34 @@
+{{- if .Values.rateLimiting.tokenRates.enabled }}
+apiVersion: kuadrant.io/v1alpha1
+kind: TokenRateLimitPolicy
+metadata:
+  name: {{ .Values.global.name }}-token-rl
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: {{ .Values.llminferenceservice.gateway.name }}
+    namespace: {{ .Values.llminferenceservice.gateway.namespace }}
+  limits:
+    {{- range .Values.rateLimiting.tiers }}
+    {{- $tierName := .name }}
+    {{- range $idx, $rate := .tokenRates }}
+    {{ $tierName }}-tok-{{ $idx }}:
+      rates:
+        - limit: {{ $rate.limit | int64 }}
+          window: {{ $rate.window }}
+      when:
+        - predicate: request.path.endsWith("/chat/completions")
+        {{- if eq $tierName "free" }}
+        - predicate: auth.identity.user.groups.exists(g, g == "system:authenticated")
+        {{- else }}
+        - predicate: auth.identity.user.groups.exists(g, g == "{{ $tierName }}-users")
+        {{- end }}
+      counters:
+        - expression: auth.identity.user.username
+    {{- end }}
+    {{- end }}
+{{- end }}
