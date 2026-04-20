@@ -1,7 +1,7 @@
 rhoai:
   enabled: true
   namespace: redhat-ods-operator
-  channel: fast-3.x
+  channel: beta
   source: redhat-operators
   sourceNamespace: openshift-marketplace
 

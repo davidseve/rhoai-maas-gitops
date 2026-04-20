@@ -38,85 +38,25 @@ dashboard:
   genAiStudio: true
   modelAsService: true
 
+# Gateway is a PREREQUISITE for modelsAsService in the DSC.
+# The maas-controller needs this Gateway to exist before it can reconcile.
+# It does NOT create the Gateway itself -- we must provide it.
 gateway:
   enabled: true
   name: maas-default-gateway
   namespace: openshift-ingress
-  # TLS secret for the Gateway listener.
-  # passthrough mode (default): use the cluster wildcard cert
-  #   bare-metal: router-certs-default
-  #   AWS: ingress-certs
-  # reencrypt mode: use a service-ca generated cert
-  #   annotate the gateway svc with service.beta.openshift.io/serving-cert-secret-name
-  #   e.g. maas-gateway-service-tls
   tlsSecretName: ingress-certs
   modelNamespaces:
     - maas-models
 
+# Route exposes the maas-default-gateway externally.
+# The Service target name depends on the GatewayClass -- verify after deploy.
 route:
   enabled: true
   name: maas-default-gateway
   namespace: openshift-ingress
-  # passthrough (default): TLS goes directly from client to Gateway.
-  #   Requires gateway.tlsSecretName to be the wildcard cert for *.apps.<clusterDomain>.
-  # reencrypt: router terminates external TLS, re-encrypts to Gateway with service-ca cert.
-  #   Requires gateway.tlsSecretName to be a service-ca cert + annotation on the svc.
+  # Service name created by Gateway API for the maas-default-gateway
+  # This changes depending on GatewayClass name. Check with:
+  #   oc get svc -n openshift-ingress | grep maas-default-gateway
+  serviceName: maas-default-gateway-openshift-default
   tlsTermination: passthrough
-
-# Limitador configuration
-limitador:
-  # Enables limit_name labels on authorized metrics (not just limited_calls)
-  exhaustiveTelemetry: true
-
-# Tier definitions: mapped to tier-to-group-mapping ConfigMap + OpenShift Groups
-# Each tier defines: name, displayName, level, groups, requestRates, tokenRates
-tiers:
-  - name: free
-    displayName: "Free"
-    level: 0
-    groups:
-      - name: system:authenticated
-    requestRates:
-      - limit: 100
-        window: 1m
-      - limit: 5000
-        window: 24h
-    tokenRates:
-      - limit: 10000
-        window: 1m
-      - limit: 500000
-        window: 24h
-
-  - name: premium
-    displayName: "Premium"
-    level: 1
-    groups:
-      - name: tier-premium-users
-        users: []
-    requestRates:
-      - limit: 500
-        window: 1m
-      - limit: 50000
-        window: 24h
-    tokenRates:
-      - limit: 100000
-        window: 1m
-      - limit: 5000000
-        window: 24h
-
-  - name: enterprise
-    displayName: "Enterprise"
-    level: 2
-    groups:
-      - name: tier-enterprise-users
-        users: []
-    requestRates:
-      - limit: 2000
-        window: 1m
-      - limit: 200000
-        window: 24h
-    tokenRates:
-      - limit: 500000
-        window: 1m
-      - limit: 25000000
-        window: 24h

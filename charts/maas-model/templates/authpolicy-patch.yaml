@@ -1,0 +1,62 @@
+{{- /*
+Route-level AuthPolicy for MaaS token authentication.
+
+The maas-controller creates gateway-auth-policy (correct config) but it gets
+Overridden by odh-model-controller's maas-default-gateway-authn (wrong audience/verb).
+This route-level policy takes precedence over both gateway-level policies, ensuring
+MaaS tokens (audience: maas-default-gateway-sa) are accepted for inference.
+
+Mirrors gateway-auth-policy but targets the model's HTTPRoute directly.
+*/}}
+apiVersion: kuadrant.io/v1
+kind: AuthPolicy
+metadata:
+  name: {{ .Values.global.name }}-maas-auth
+  namespace: {{ .Values.global.namespace }}
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: {{ .Values.global.name }}-kserve-route
+  rules:
+    authentication:
+      service-accounts:
+        kubernetesTokenReview:
+          audiences:
+            - maas-default-gateway-sa
+        defaults:
+          userid:
+            expression: |
+              auth.identity.user.username.split(":")[3]
+        cache:
+          key:
+            selector: context.request.http.headers.authorization.@case:lower
+          ttl: 600
+        metrics: false
+        priority: 0
+    authorization:
+      tier-access:
+        kubernetesSubjectAccessReview:
+          user:
+            expression: auth.identity.user.username
+          authorizationGroups:
+            expression: auth.identity.user.groups
+          resourceAttributes:
+            group:
+              value: serving.kserve.io
+            resource:
+              value: llminferenceservices
+            verb:
+              value: post
+            name:
+              expression: |
+                request.path.split("/")[2]
+            namespace:
+              expression: |
+                request.path.split("/")[1]
+        cache:
+          key:
+            selector: '{auth.identity.user.username}:{request.path}'
+          ttl: 60
+        metrics: false
+        priority: 0
