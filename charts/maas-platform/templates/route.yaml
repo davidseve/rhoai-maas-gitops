@@ -19,7 +19,7 @@ spec:
     {{- end }}
   to:
     kind: Service
-    name: {{ .Values.gateway.name }}-data-science-gateway-class
+    name: {{ .Values.gateway.name }}-openshift-default
     weight: 100
   wildcardPolicy: None
 {{- end }}
