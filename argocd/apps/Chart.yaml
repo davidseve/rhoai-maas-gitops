@@ -1,0 +1,4 @@
+apiVersion: v2
+name: maas-app-of-apps
+description: ArgoCD child applications for MaaS
+version: 0.1.0
