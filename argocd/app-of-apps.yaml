@@ -8,10 +8,11 @@ spec:
   source:
     repoURL: https://github.com/davidseve/rhoai-maas-gitops.git
     targetRevision: main
-    path: argocd
-    directory:
-      recurse: false
-      include: '{operators.yaml,maas-platform.yaml,maas-model.yaml}'
+    path: argocd/apps
+    helm:
+      parameters:
+        - name: clusterDomain
+          value: apps.ocp.sandbox3733.opentlc.com
   destination:
     server: https://kubernetes.default.svc
     namespace: openshift-gitops

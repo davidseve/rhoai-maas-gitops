@@ -55,12 +55,14 @@ charts/
   maas-model/                # Helm chart — model deployment
 ```
 
-| ArgoCD Application | Wave | Chart | What it deploys |
-|---|---|---|---|
-| `maas-gitops` | — | `argocd/` (app-of-apps) | Creates the 3 child Applications below |
-| `maas-operators` | 0 | `charts/operators/` | RHOAI 3.3, Kuadrant, LeaderWorkerSet subscriptions + CRs |
-| `maas-platform` | 1 | `charts/maas-platform/` | DSCInitialization, DataScienceCluster, Gateway, Route, DashboardConfig |
-| `maas-model` | 2 | `charts/maas-model/` | Namespace, LLMInferenceService, RBAC, AuthPolicy fix |
+
+| ArgoCD Application | Wave | Chart                   | What it deploys                                                        |
+| ------------------ | ---- | ----------------------- | ---------------------------------------------------------------------- |
+| `maas-gitops`      | —    | `argocd/` (app-of-apps) | Creates the 3 child Applications below                                 |
+| `maas-operators`   | 0    | `charts/operators/`     | RHOAI 3.3, Kuadrant, LeaderWorkerSet subscriptions + CRs               |
+| `maas-platform`    | 1    | `charts/maas-platform/` | DSCInitialization, DataScienceCluster, Gateway, Route, DashboardConfig |
+| `maas-model`       | 2    | `charts/maas-model/`    | Namespace, LLMInferenceService, RBAC, AuthPolicy fix                   |
+
 
 Sync-waves ensure ordered deployment: operators install first (wave 0), then platform resources that depend on operator CRDs (wave 1), then the model that depends on KServe and the Gateway (wave 2).
 
@@ -78,7 +80,7 @@ oc login -u <admin-user> <api-server-url>
 
 ### Step 2: Update cluster domain
 
-Edit `argocd/maas-platform.yaml` and set your cluster domain:
+Edit `argocd/app-of-apps.yaml` and set your cluster domain:
 
 ```yaml
 spec:
@@ -92,7 +94,7 @@ spec:
 ### Step 3: Deploy
 
 ```bash
-oc apply -f https://raw.githubusercontent.com/davidseve/rhoai-maas-gitops/main/argocd/app-of-apps.yaml
+oc apply -f argocd/app-of-apps.yaml
 ```
 
 That's it. ArgoCD will:
@@ -149,14 +151,16 @@ curl -sk "https://$MAAS_HOST/maas-models/tinyllama-test/v1/chat/completions" \
 
 ### Timeline
 
-| Time | What happens |
-|------|-------------|
-| T+0s | `oc apply` of the app-of-apps |
-| T+30s | Wave 0: operator namespaces and subscriptions created |
+
+| Time    | What happens                                             |
+| ------- | -------------------------------------------------------- |
+| T+0s    | `oc apply` of the app-of-apps                            |
+| T+30s   | Wave 0: operator namespaces and subscriptions created    |
 | T+1m30s | Wave 0: operators installed, CRs created (Kuadrant, LWS) |
-| T+2m | Wave 1: DSCI + DSC + Gateway + Route applied |
-| T+3m | Wave 2: LLMInferenceService + RBAC + AuthPolicy applied |
-| T+3-5m | All apps `Synced + Healthy`, model responding |
+| T+2m    | Wave 1: DSCI + DSC + Gateway + Route applied             |
+| T+3m    | Wave 2: LLMInferenceService + RBAC + AuthPolicy applied  |
+| T+3-5m  | All apps `Synced + Healthy`, model responding            |
+
 
 ---
 
@@ -166,13 +170,15 @@ The `maas-model` chart (`charts/maas-model/`) deploys a complete MaaS-integrated
 
 ### Resources created
 
-| Resource | Name | Purpose |
-|---|---|---|
-| `Namespace` | `maas-models` | Dedicated namespace for model workloads |
-| `LLMInferenceService` | `tinyllama-test` | Model deployment with CPU vLLM, registered in MaaS |
-| `Role` | `tinyllama-test-maas-access` | Allows `get` + `post` on the LLMInferenceService |
-| `RoleBinding` | `tinyllama-test-maas-access` | Binds the role to tier ServiceAccount groups |
-| `AuthPolicy` | `maas-default-gateway-authn` | Fixes the audience list for MaaS token authentication |
+
+| Resource              | Name                         | Purpose                                               |
+| --------------------- | ---------------------------- | ----------------------------------------------------- |
+| `Namespace`           | `maas-models`                | Dedicated namespace for model workloads               |
+| `LLMInferenceService` | `tinyllama-test`             | Model deployment with CPU vLLM, registered in MaaS    |
+| `Role`                | `tinyllama-test-maas-access` | Allows `get` + `post` on the LLMInferenceService      |
+| `RoleBinding`         | `tinyllama-test-maas-access` | Binds the role to tier ServiceAccount groups          |
+| `AuthPolicy`          | `maas-default-gateway-authn` | Fixes the audience list for MaaS token authentication |
+
 
 ### CPU vLLM override
 
@@ -200,17 +206,20 @@ template:
 ```
 
 Key details:
-- **`command` override**: The CPU image has `ENTRYPOINT ["/bin/bash", "-c"]`, so we must set `command` explicitly to invoke vLLM directly.
+
+- `**command` override**: The CPU image has `ENTRYPOINT ["/bin/bash", "-c"]`, so we must set `command` explicitly to invoke vLLM directly.
 - **TLS args**: KServe injects HTTPS readiness/liveness probes. vLLM must serve TLS using the certificates mounted at `/var/run/kserve/tls/` by the KServe operator.
 
 ### AuthPolicy audience fix
 
 The `odh-model-controller` creates two AuthPolicies automatically when a Gateway + LLMInferenceService exist:
 
-| AuthPolicy | Namespace | Created with correct audiences? |
-|---|---|---|
-| `maas-api-auth-policy` | `redhat-ods-applications` | Yes — includes both `https://kubernetes.default.svc` and `maas-default-gateway-sa` |
-| `maas-default-gateway-authn` | `openshift-ingress` | **No** — only includes `https://kubernetes.default.svc` |
+
+| AuthPolicy                   | Namespace                 | Created with correct audiences?                                                    |
+| ---------------------------- | ------------------------- | ---------------------------------------------------------------------------------- |
+| `maas-api-auth-policy`       | `redhat-ods-applications` | Yes — includes both `https://kubernetes.default.svc` and `maas-default-gateway-sa` |
+| `maas-default-gateway-authn` | `openshift-ingress`       | **No** — only includes `https://kubernetes.default.svc`                            |
+
 
 MaaS tokens are issued with audience `maas-default-gateway-sa`. Without this audience in the Gateway AuthPolicy, inference requests with MaaS tokens return `401 Unauthorized`.
 
@@ -290,6 +299,7 @@ REENCRYPT:
 TLS goes from the client directly to the Gateway. The OpenShift Router acts as a TCP proxy.
 
 **Requirements:**
+
 - The Gateway must use a TLS certificate matching `maas.<clusterDomain>`.
 - This is typically the cluster's wildcard certificate (`*.apps.<clusterDomain>`).
 
@@ -304,11 +314,13 @@ route:
 
 **Wildcard certificate secret by platform:**
 
-| Platform | Secret name | Notes |
-|----------|-------------|-------|
-| AWS (ROSA, IPI) | `ingress-certs` | Let's Encrypt or ACM cert |
-| Bare-metal / UPI | `router-certs-default` | Self-signed or custom CA |
-| Custom | `oc get secret -n openshift-ingress \| grep tls` | Check your cluster |
+
+| Platform         | Secret name                                     | Notes                     |
+| ---------------- | ----------------------------------------------- | ------------------------- |
+| AWS (ROSA, IPI)  | `ingress-certs`                                 | Let's Encrypt or ACM cert |
+| Bare-metal / UPI | `router-certs-default`                          | Self-signed or custom CA  |
+| Custom           | `oc get secret -n openshift-ingress | grep tls` | Check your cluster        |
+
 
 ### Option B: Reencrypt
 
@@ -332,11 +344,13 @@ oc annotate svc maas-default-gateway-data-science-gateway-class \
 
 ### Decision guide
 
-| Scenario | Mode | Gateway cert | Why |
-|----------|------|-------------|-----|
-| AWS with known wildcard cert | **passthrough** | `ingress-certs` | Simple, no extra steps |
-| Bare-metal with `router-certs-default` | **passthrough** | `router-certs-default` | Simple |
-| Unknown platform / multi-cluster | **reencrypt** | `maas-gateway-service-tls` | Platform-independent |
+
+| Scenario                               | Mode            | Gateway cert               | Why                    |
+| -------------------------------------- | --------------- | -------------------------- | ---------------------- |
+| AWS with known wildcard cert           | **passthrough** | `ingress-certs`            | Simple, no extra steps |
+| Bare-metal with `router-certs-default` | **passthrough** | `router-certs-default`     | Simple                 |
+| Unknown platform / multi-cluster       | **reencrypt**   | `maas-gateway-service-tls` | Platform-independent   |
+
 
 ---
 
@@ -359,11 +373,13 @@ helm template operators charts/operators/ | oc apply -f -
 
 This installs:
 
-| Operator | Package | Channel | Namespace |
-|----------|---------|---------|-----------|
-| Red Hat OpenShift AI 3.3 | `rhods-operator` | `fast-3.x` | `redhat-ods-operator` |
-| Red Hat Connectivity Link (Kuadrant) | `rhcl-operator` | `stable` | `kuadrant-system` |
-| LeaderWorkerSet | `leader-worker-set` | `stable-v1.0` | `leader-worker-set` |
+
+| Operator                             | Package             | Channel       | Namespace             |
+| ------------------------------------ | ------------------- | ------------- | --------------------- |
+| Red Hat OpenShift AI 3.3             | `rhods-operator`    | `fast-3.x`    | `redhat-ods-operator` |
+| Red Hat Connectivity Link (Kuadrant) | `rhcl-operator`     | `stable`      | `kuadrant-system`     |
+| LeaderWorkerSet                      | `leader-worker-set` | `stable-v1.0` | `leader-worker-set`   |
+
 
 The Kuadrant CR and LeaderWorkerSet CR require their CRDs to exist first. If the initial apply fails on these resources, wait and re-run:
 
@@ -443,6 +459,7 @@ oc get application <app-name> -n openshift-gitops \
 ```
 
 Common causes:
+
 - **CRD not yet installed**: The operator hasn't created the CRD yet. ArgoCD retries automatically (up to 10–30 attempts with exponential backoff).
 - **Namespace not found**: A resource targets a namespace that doesn't exist yet (e.g. `redhat-ods-applications` before DSC creates it). The `SkipDryRunOnMissingResource` sync option handles this.
 - **Stuck retry with old revision**: If a new git push doesn't take effect because ArgoCD is still retrying the old revision, clear the operation and force refresh:
@@ -518,13 +535,15 @@ The fix is to add `--ssl-certfile` and `--ssl-keyfile` args pointing to the KSer
 
 The DSC CRD has two API versions with **different field names**:
 
-| v1 field | v2 field |
-|----------|----------|
-| `datasciencepipelines` | `aipipelines` |
-| `modelmeshserving` | _(removed)_ |
-| `codeflare` | _(removed)_ |
-| _(none)_ | `mlflowoperator` |
-| _(none)_ | `trainer` |
+
+| v1 field               | v2 field         |
+| ---------------------- | ---------------- |
+| `datasciencepipelines` | `aipipelines`    |
+| `modelmeshserving`     | *(removed)*      |
+| `codeflare`            | *(removed)*      |
+| *(none)*               | `mlflowoperator` |
+| *(none)*               | `trainer`        |
+
 
 This chart uses `apiVersion: v2`. If you see "field not declared in schema", verify you're using the v2 field names.
 
@@ -532,11 +551,14 @@ This chart uses `apiVersion: v2`. If you see "field not declared in schema", ver
 
 ## Tested Versions
 
-| Component | Version |
-|-----------|---------|
-| OpenShift | 4.20.8 |
-| RHOAI | 3.3.1 |
-| Red Hat Connectivity Link | 1.3.2 |
-| cert-manager | 1.18.1 (pre-installed) |
-| LeaderWorkerSet | 1.0.0 |
-| OpenShift GitOps (ArgoCD) | 1.20.1 |
+
+| Component                 | Version                |
+| ------------------------- | ---------------------- |
+| OpenShift                 | 4.20.8                 |
+| RHOAI                     | 3.3.1                  |
+| Red Hat Connectivity Link | 1.3.2                  |
+| cert-manager              | 1.18.1 (pre-installed) |
+| LeaderWorkerSet           | 1.0.0                  |
+| OpenShift GitOps (ArgoCD) | 1.20.1                 |
+
+
