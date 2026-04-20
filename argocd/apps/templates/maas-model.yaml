@@ -9,7 +9,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/davidseve/rhoai-maas-gitops.git
-    targetRevision: main
+    targetRevision: feature/maas-governance-stack
     path: charts/maas-model
     helm:
       valueFiles:

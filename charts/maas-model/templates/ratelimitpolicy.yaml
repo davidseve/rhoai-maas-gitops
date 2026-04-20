@@ -2,32 +2,24 @@
 apiVersion: kuadrant.io/v1
 kind: RateLimitPolicy
 metadata:
-  name: {{ .Values.global.name }}-request-rl
-  namespace: {{ .Values.global.namespace }}
+  name: gateway-rate-limits
+  namespace: openshift-ingress
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   targetRef:
     group: gateway.networking.k8s.io
     kind: Gateway
-    name: {{ .Values.llminferenceservice.gateway.name }}
-    namespace: {{ .Values.llminferenceservice.gateway.namespace }}
+    name: maas-default-gateway
   limits:
     {{- range .Values.rateLimiting.tiers }}
-    {{- $tierName := .name }}
-    {{- range $idx, $rate := .requestRates }}
-    {{ $tierName }}-req-{{ $idx }}:
+    {{ .name }}:
       rates:
-        - limit: {{ $rate.limit | int64 }}
-          window: {{ $rate.window }}
+        {{- toYaml .requestRates | nindent 8 }}
       when:
-        {{- if eq $tierName "free" }}
-        - predicate: auth.identity.user.groups.exists(g, g == "system:authenticated")
-        {{- else }}
-        - predicate: auth.identity.user.groups.exists(g, g == "{{ $tierName }}-users")
-        {{- end }}
+        - predicate: |
+            auth.identity.tier == "{{ .name }}"
       counters:
-        - expression: auth.identity.user.username
-    {{- end }}
+        - expression: auth.identity.userid
     {{- end }}
 {{- end }}

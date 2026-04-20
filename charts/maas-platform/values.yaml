@@ -91,7 +91,7 @@ tiers:
     displayName: "Premium"
     level: 1
     groups:
-      - name: premium-users
+      - name: tier-premium-users
         users: []
     requestRates:
       - limit: 500
@@ -108,7 +108,7 @@ tiers:
     displayName: "Enterprise"
     level: 2
     groups:
-      - name: enterprise-users
+      - name: tier-enterprise-users
         users: []
     requestRates:
       - limit: 2000

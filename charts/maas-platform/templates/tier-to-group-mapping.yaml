@@ -7,7 +7,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 data:
-  mapping: |
+  tiers: |
     [
       {{- $last := sub (len .Values.tiers) 1 }}
       {{- range $i, $tier := .Values.tiers }}

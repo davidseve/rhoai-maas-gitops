@@ -4,6 +4,9 @@ kind: Gateway
 metadata:
   name: {{ .Values.gateway.name }}
   namespace: {{ .Values.gateway.namespace }}
+  annotations:
+    opendatahub.io/managed: "false"
+    security.opendatahub.io/authorino-tls-bootstrap: "true"
 spec:
   gatewayClassName: data-science-gateway-class
   listeners:
