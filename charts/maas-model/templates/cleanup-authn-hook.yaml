@@ -1,0 +1,86 @@
+{{- if eq .Values.mode "llminferenceservice" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cleanup-gateway-authn
+  namespace: {{ .Values.llminferenceservice.gateway.namespace }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cleanup-gateway-authn
+  namespace: {{ .Values.llminferenceservice.gateway.namespace }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+rules:
+- apiGroups: ["kuadrant.io"]
+  resources: ["authpolicies"]
+  verbs: ["get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cleanup-gateway-authn
+  namespace: {{ .Values.llminferenceservice.gateway.namespace }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+subjects:
+- kind: ServiceAccount
+  name: cleanup-gateway-authn
+  namespace: {{ .Values.llminferenceservice.gateway.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cleanup-gateway-authn
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cleanup-gateway-authn
+  namespace: {{ .Values.llminferenceservice.gateway.namespace }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 120
+  template:
+    spec:
+      serviceAccountName: cleanup-gateway-authn
+      restartPolicy: Never
+      containers:
+      - name: cleanup
+        image: registry.redhat.io/openshift4/ose-cli:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+          POLICY="{{ .Values.llminferenceservice.gateway.name }}-authn"
+          NS="{{ .Values.llminferenceservice.gateway.namespace }}"
+
+          if oc get authpolicy "$POLICY" -n "$NS" &>/dev/null; then
+            echo "Deleting odh-model-controller AuthPolicy: $POLICY"
+            oc delete authpolicy "$POLICY" -n "$NS"
+            echo "Waiting for gateway-auth-policy to become Enforced..."
+            for i in $(seq 1 12); do
+              ENFORCED=$(oc get authpolicy gateway-auth-policy -n "$NS" \
+                -o jsonpath='{.status.conditions[?(@.type=="Enforced")].status}' 2>/dev/null)
+              echo "  attempt $i/12 - Enforced=$ENFORCED"
+              if [ "$ENFORCED" = "True" ]; then
+                echo "gateway-auth-policy is Enforced."
+                exit 0
+              fi
+              sleep 5
+            done
+            echo "WARNING: gateway-auth-policy did not become Enforced within timeout"
+            exit 0
+          else
+            echo "No conflicting AuthPolicy found, gateway-auth-policy should be active."
+          fi
+{{- end }}
