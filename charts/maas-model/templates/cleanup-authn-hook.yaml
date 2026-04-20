@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: cleanup-gateway-authn
+  name: patch-gateway-authn
   namespace: {{ .Values.llminferenceservice.gateway.namespace }}
   annotations:
     argocd.argoproj.io/hook: PostSync
@@ -11,7 +11,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: cleanup-gateway-authn
+  name: patch-gateway-authn
   namespace: {{ .Values.llminferenceservice.gateway.namespace }}
   annotations:
     argocd.argoproj.io/hook: PostSync
@@ -19,29 +19,29 @@ metadata:
 rules:
 - apiGroups: ["kuadrant.io"]
   resources: ["authpolicies"]
-  verbs: ["get", "delete"]
+  verbs: ["get", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: cleanup-gateway-authn
+  name: patch-gateway-authn
   namespace: {{ .Values.llminferenceservice.gateway.namespace }}
   annotations:
     argocd.argoproj.io/hook: PostSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 subjects:
 - kind: ServiceAccount
-  name: cleanup-gateway-authn
+  name: patch-gateway-authn
   namespace: {{ .Values.llminferenceservice.gateway.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: cleanup-gateway-authn
+  name: patch-gateway-authn
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: cleanup-gateway-authn
+  name: patch-gateway-authn
   namespace: {{ .Values.llminferenceservice.gateway.namespace }}
   annotations:
     argocd.argoproj.io/hook: PostSync
@@ -51,10 +51,10 @@ spec:
   activeDeadlineSeconds: 120
   template:
     spec:
-      serviceAccountName: cleanup-gateway-authn
+      serviceAccountName: patch-gateway-authn
       restartPolicy: Never
       containers:
-      - name: cleanup
+      - name: patch
         image: registry.redhat.io/openshift4/ose-cli:latest
         command:
         - /bin/bash
@@ -64,23 +64,96 @@ spec:
           POLICY="{{ .Values.llminferenceservice.gateway.name }}-authn"
           NS="{{ .Values.llminferenceservice.gateway.namespace }}"
 
-          if oc get authpolicy "$POLICY" -n "$NS" &>/dev/null; then
-            echo "Deleting odh-model-controller AuthPolicy: $POLICY"
-            oc delete authpolicy "$POLICY" -n "$NS"
-            echo "Waiting for gateway-auth-policy to become Enforced..."
-            for i in $(seq 1 12); do
-              ENFORCED=$(oc get authpolicy gateway-auth-policy -n "$NS" \
-                -o jsonpath='{.status.conditions[?(@.type=="Enforced")].status}' 2>/dev/null)
-              echo "  attempt $i/12 - Enforced=$ENFORCED"
-              if [ "$ENFORCED" = "True" ]; then
-                echo "gateway-auth-policy is Enforced."
-                exit 0
-              fi
-              sleep 5
-            done
-            echo "WARNING: gateway-auth-policy did not become Enforced within timeout"
-            exit 0
-          else
-            echo "No conflicting AuthPolicy found, gateway-auth-policy should be active."
-          fi
+          echo "Waiting for $POLICY to exist..."
+          for i in $(seq 1 12); do
+            if oc get authpolicy "$POLICY" -n "$NS" &>/dev/null; then break; fi
+            echo "  attempt $i/12"; sleep 5
+          done
+
+          echo "Patching $POLICY with MaaS audience + tier resolution..."
+          oc patch authpolicy "$POLICY" -n "$NS" --type=merge -p '{
+            "spec": {
+              "rules": {
+                "authentication": {
+                  "service-accounts": {
+                    "kubernetesTokenReview": {
+                      "audiences": ["https://kubernetes.default.svc", "{{ .Values.llminferenceservice.gateway.name }}-sa"]
+                    },
+                    "cache": {
+                      "key": {"selector": "context.request.http.headers.authorization.@case:lower"},
+                      "ttl": 600
+                    },
+                    "defaults": {
+                      "userid": {"expression": "auth.identity.user.username.split(\":\")[3]"}
+                    },
+                    "metrics": false,
+                    "priority": 0
+                  }
+                },
+                "authorization": {
+                  "tier-access": {
+                    "kubernetesSubjectAccessReview": {
+                      "authorizationGroups": {"expression": "auth.identity.user.groups"},
+                      "resourceAttributes": {
+                        "group": {"value": "serving.kserve.io"},
+                        "name": {"expression": "request.path.split(\"/\")[2]"},
+                        "namespace": {"expression": "request.path.split(\"/\")[1]"},
+                        "resource": {"value": "llminferenceservices"},
+                        "verb": {"value": "post"}
+                      },
+                      "user": {"expression": "auth.identity.user.username"}
+                    },
+                    "cache": {
+                      "key": {"selector": "{auth.identity.user.username}:{request.path}"},
+                      "ttl": 60
+                    },
+                    "metrics": false,
+                    "priority": 0
+                  }
+                },
+                "metadata": {
+                  "matchedTier": {
+                    "http": {
+                      "url": "https://maas-api.redhat-ods-applications.svc.cluster.local:8443/v1/tiers/lookup",
+                      "method": "POST",
+                      "contentType": "application/json",
+                      "body": {"expression": "{ \"groups\": auth.identity.user.groups }"}
+                    },
+                    "cache": {
+                      "key": {"selector": "auth.identity.user.username"},
+                      "ttl": 300
+                    },
+                    "metrics": false,
+                    "priority": 0
+                  }
+                },
+                "response": {
+                  "success": {
+                    "filters": {
+                      "identity": {
+                        "json": {
+                          "properties": {
+                            "tier": {"expression": "auth.metadata.matchedTier[\"tier\"]"},
+                            "userid": {"expression": "auth.identity.userid"}
+                          }
+                        },
+                        "metrics": false,
+                        "priority": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }'
+
+          echo "Verifying patch applied..."
+          AUDIENCES=$(oc get authpolicy "$POLICY" -n "$NS" \
+            -o jsonpath='{.spec.rules.authentication.service-accounts.kubernetesTokenReview.audiences}')
+          echo "Audiences: $AUDIENCES"
+
+          TIER=$(oc get authpolicy "$POLICY" -n "$NS" \
+            -o jsonpath='{.spec.rules.metadata.matchedTier.http.url}')
+          echo "Tier lookup URL: $TIER"
+          echo "Done."
 {{- end }}
