@@ -38,7 +38,7 @@ llminferenceservice:
     namespace: openshift-ingress
 
 rbac:
-  enabled: true
+  enabled: false
   tierGroups:
     - system:serviceaccounts:maas-default-gateway-tier-free
     - system:serviceaccounts:maas-default-gateway-tier-premium
