@@ -51,7 +51,7 @@ argocd/
 
 charts/
   operators/                 # Helm chart — prerequisite operators
-  maas-platform/             # Helm chart — platform configuration
+  maas-platform/             # Helm chart — platform config + Kuadrant readiness hook
   maas-model/                # Helm chart — model deployment
 ```
 
@@ -60,8 +60,8 @@ charts/
 | ------------------ | ---- | ----------------------- | ---------------------------------------------------------------------- |
 | `maas-gitops`      | —    | `argocd/` (app-of-apps) | Creates the 3 child Applications below                                 |
 | `maas-operators`   | 0    | `charts/operators/`     | RHOAI 3.3, Kuadrant, LeaderWorkerSet subscriptions + CRs               |
-| `maas-platform`    | 1    | `charts/maas-platform/` | DSCInitialization, DataScienceCluster, Gateway, Route, DashboardConfig |
-| `maas-model`       | 2    | `charts/maas-model/`    | Namespace, LLMInferenceService, RBAC, AuthPolicy fix                   |
+| `maas-platform`    | 1    | `charts/maas-platform/` | DSCInitialization, DSC, Gateway, Route, DashboardConfig, Kuadrant readiness hook |
+| `maas-model`       | 2    | `charts/maas-model/`    | Namespace, LLMInferenceService, RBAC, AuthPolicy fix                             |
 
 
 Sync-waves ensure ordered deployment: operators install first (wave 0), then platform resources that depend on operator CRDs (wave 1), then the model that depends on KServe and the Gateway (wave 2).
@@ -102,7 +102,8 @@ That's it. ArgoCD will:
 1. Create 3 child Applications in wave order (0 → 1 → 2)
 2. **Wave 0:** Install RHOAI, Kuadrant, and LeaderWorkerSet operators; wait for CRDs; create operator CRs
 3. **Wave 1:** Create DSCInitialization, DataScienceCluster, Gateway, Route, and DashboardConfig
-4. **Wave 2:** Create the model namespace, deploy LLMInferenceService with CPU vLLM, configure RBAC and fix the AuthPolicy audience
+4. **Wave 1 PostSync:** Run the Kuadrant readiness hook (auto-restarts operator if stuck in `MissingDependency`)
+5. **Wave 2:** Create the model namespace, deploy LLMInferenceService with CPU vLLM, configure RBAC and fix the AuthPolicy audience
 
 ### Step 4: Monitor progress
 
@@ -152,15 +153,36 @@ curl -sk "https://$MAAS_HOST/maas-models/tinyllama-test/v1/chat/completions" \
 ### Timeline
 
 
-| Time    | What happens                                             |
-| ------- | -------------------------------------------------------- |
-| T+0s    | `oc apply` of the app-of-apps                            |
-| T+30s   | Wave 0: operator namespaces and subscriptions created    |
-| T+1m30s | Wave 0: operators installed, CRs created (Kuadrant, LWS) |
-| T+2m    | Wave 1: DSCI + DSC + Gateway + Route applied             |
-| T+3m    | Wave 2: LLMInferenceService + RBAC + AuthPolicy applied  |
-| T+3-5m  | All apps `Synced + Healthy`, model responding            |
+| Time    | What happens                                                        |
+| ------- | ------------------------------------------------------------------- |
+| T+0s    | `oc apply` of the app-of-apps                                       |
+| T+30s   | Wave 0: operator namespaces and subscriptions created               |
+| T+1m30s | Wave 0: operators installed, CRs created (Kuadrant, LWS)            |
+| T+2m    | Wave 1: DSCI + DSC + Gateway + Route applied                        |
+| T+2m30s | Wave 1 PostSync: readiness hook checks Kuadrant, restarts if needed |
+| T+3m    | Wave 2: LLMInferenceService + RBAC + AuthPolicy applied             |
+| T+3-5m  | All apps `Synced + Healthy`, model responding                       |
 
+
+### Kuadrant readiness hook (automatic)
+
+The Kuadrant operator frequently starts before KServe finishes deploying Istio (the Gateway API provider). When this happens, Kuadrant enters a `MissingDependency` state and never recovers on its own — all AuthPolicies remain `Accepted: False`, breaking MaaS token generation and inference.
+
+The `maas-platform` chart includes an ArgoCD **PostSync hook** (`kuadrant-readiness-hook.yaml`) that runs automatically after every sync:
+
+1. Waits for the Kuadrant CR to exist
+2. Polls the `Ready` condition up to 30 times (5 minutes total)
+3. If `Ready=True` → exits successfully (nothing to do)
+4. If `reason=MissingDependency` → restarts the Kuadrant operator pod, then waits for reconciliation
+5. If Kuadrant never becomes ready → the Job fails, and ArgoCD marks the sync as `PostSync Failed`
+
+The hook creates its own `ServiceAccount`, `ClusterRole`, and `ClusterRoleBinding` scoped to only the permissions it needs (`get` on Kuadrant CRs, `list`/`delete` on pods). All hook resources use `argocd.argoproj.io/hook-delete-policy: BeforeHookCreation` so they are cleaned up on the next sync.
+
+In manual deployments (without ArgoCD), this hook does not run. Instead, restart the operator manually if you see `MissingDependency`:
+
+```bash
+oc delete pod -n kuadrant-system -l control-plane=controller-manager
+```
 
 ---
 
@@ -393,10 +415,10 @@ oc get csv -n leader-worker-set | grep leader      # Succeeded
 helm template operators charts/operators/ | oc apply -f -
 ```
 
-If Kuadrant shows `MissingDependency` (Gateway API provider), restart its pod after RHOAI finishes installing Istio:
+If Kuadrant shows `MissingDependency` (Gateway API provider), restart its pod after RHOAI finishes installing Istio. This is the same race condition that the ArgoCD PostSync hook handles automatically:
 
 ```bash
-oc delete pod -n kuadrant-system -l control-plane=controller-manager -l app=kuadrant
+oc delete pod -n kuadrant-system -l control-plane=controller-manager
 ```
 
 ### Step 3: Deploy MaaS platform
@@ -505,11 +527,22 @@ The operator creates a Role with only `post`, but the AuthPolicy authorization c
 oc get authpolicy -n openshift-ingress -o jsonpath='{range .items[*]}{.metadata.name}: {.status.conditions[0].reason}{"\n"}{end}'
 ```
 
-If it shows `MissingDependency` for "Gateway API provider (istio / envoy gateway)", the RHOAI operator hasn't finished deploying Istio. Wait for the DSC to be `Ready`, then restart the Kuadrant operator:
+If it shows `MissingDependency` for "Gateway API provider (istio / envoy gateway)", the RHOAI operator hasn't finished deploying Istio when Kuadrant started.
+
+**With ArgoCD:** This is handled automatically by the PostSync readiness hook in the `maas-platform` chart. Check the hook Job status:
 
 ```bash
-oc delete pod -n kuadrant-system -l control-plane=controller-manager -l app=kuadrant
+oc get job kuadrant-readiness-check -n kuadrant-system
+oc logs job/kuadrant-readiness-check -n kuadrant-system
 ```
+
+If the hook Job failed or is not present, restart the Kuadrant operator manually:
+
+```bash
+oc delete pod -n kuadrant-system -l control-plane=controller-manager
+```
+
+**Without ArgoCD:** Wait for the DSC to be `Ready`, then restart the Kuadrant operator manually with the command above.
 
 ### vLLM pod CrashLoopBackOff with "invalid option"
 
