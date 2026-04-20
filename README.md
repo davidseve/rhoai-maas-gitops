@@ -232,20 +232,21 @@ Key details:
 - `**command` override**: The CPU image has `ENTRYPOINT ["/bin/bash", "-c"]`, so we must set `command` explicitly to invoke vLLM directly.
 - **TLS args**: KServe injects HTTPS readiness/liveness probes. vLLM must serve TLS using the certificates mounted at `/var/run/kserve/tls/` by the KServe operator.
 
-### AuthPolicy audience fix
+### AuthPolicy governance patch (PostSync hook)
 
-The `odh-model-controller` creates two AuthPolicies automatically when a Gateway + LLMInferenceService exist:
+The `odh-model-controller` creates `maas-default-gateway-authn` automatically when a Gateway + LLMInferenceService exist. This basic AuthPolicy only includes `https://kubernetes.default.svc` as audience — missing `maas-default-gateway-sa` required by MaaS tokens.
 
+Additionally, for the governance stack, this AuthPolicy needs:
+- Tier resolution via HTTP metadata call to `maas-api`
+- Response filters injecting `tier` and `userid` for rate limiting
+- Custom authorization with SubjectAccessReview
 
-| AuthPolicy                   | Namespace                 | Created with correct audiences?                                                    |
-| ---------------------------- | ------------------------- | ---------------------------------------------------------------------------------- |
-| `maas-api-auth-policy`       | `redhat-ods-applications` | Yes — includes both `https://kubernetes.default.svc` and `maas-default-gateway-sa` |
-| `maas-default-gateway-authn` | `openshift-ingress`       | **No** — only includes `https://kubernetes.default.svc`                            |
+The chart includes a **PostSync hook** (`cleanup-authn-hook.yaml`) that patches `maas-default-gateway-authn` after every ArgoCD sync with the complete governance configuration. This approach works because:
+- Deleting the policy is not viable (`odh-model-controller` recreates it immediately)
+- The `opendatahub.io/managed: "false"` annotation is ignored in RHOAI 3.3.1
+- Patching preserves the controller's ownership while adding governance fields
 
-
-MaaS tokens are issued with audience `maas-default-gateway-sa`. Without this audience in the Gateway AuthPolicy, inference requests with MaaS tokens return `401 Unauthorized`.
-
-The chart includes `authpolicy-patch.yaml` which declares `maas-default-gateway-authn` with both audiences. ArgoCD applies it via `ServerSideApply`, overriding the incomplete version created by the operator. With `selfHeal: true`, if the operator reverts the change, ArgoCD will re-apply the fix.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full technical details.
 
 ### RBAC for tier access
 
@@ -444,16 +445,18 @@ helm template tinyllama charts/maas-model/ | oc apply -f -
 
 ### Step 5: Patch AuthPolicy (manual only)
 
-When deploying without ArgoCD, you must manually fix the AuthPolicy audience:
+When deploying without ArgoCD, you must manually patch `maas-default-gateway-authn` to add the MaaS audience and governance fields:
 
 ```bash
 oc patch authpolicy maas-default-gateway-authn -n openshift-ingress \
-  --type=merge -p '{"spec":{"rules":{"authentication":{"kubernetes-user":{"kubernetesTokenReview":{"audiences":["https://kubernetes.default.svc","maas-default-gateway-sa"]}}}}}}'
+  --type=merge -p '{"spec":{"rules":{"authentication":{"service-accounts":{"kubernetesTokenReview":{"audiences":["https://kubernetes.default.svc","maas-default-gateway-sa"]}}}}}}'
 ```
 
-This is needed because the `odh-model-controller` creates this AuthPolicy with only one audience (`https://kubernetes.default.svc`), but MaaS tokens use audience `maas-default-gateway-sa`. Without this patch, inference with MaaS tokens returns `401`.
+This is needed because `odh-model-controller` creates this AuthPolicy with only `https://kubernetes.default.svc` as audience. MaaS tokens use audience `maas-default-gateway-sa`, so without this patch, inference returns `401`.
 
-> **Note:** With ArgoCD deployment, this fix is applied automatically by the `authpolicy-patch.yaml` template in the model chart.
+For full governance (tier resolution, per-user rate limiting), see the complete patch in `charts/maas-model/templates/cleanup-authn-hook.yaml`.
+
+> **Note:** With ArgoCD deployment, the PostSync hook applies this patch automatically on every sync.
 
 ### Step 6: Verify
 
