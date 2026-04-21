@@ -1,0 +1,11 @@
+{{- if .Values.limitador.exhaustiveTelemetry }}
+apiVersion: limitador.kuadrant.io/v1alpha1
+kind: Limitador
+metadata:
+  name: limitador
+  namespace: kuadrant-system
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  telemetry: exhaustive
+{{- end }}

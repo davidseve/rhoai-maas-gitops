@@ -1,10 +1,13 @@
-{{- if .Values.kuadrant.enabled }}
+{{- if .Values.connectivityLink.enabled }}
 apiVersion: kuadrant.io/v1beta1
 kind: Kuadrant
 metadata:
   name: kuadrant
-  namespace: {{ .Values.kuadrant.namespace }}
+  namespace: {{ .Values.connectivityLink.namespace }}
   annotations:
     argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  observability:
+    enable: {{ .Values.connectivityLink.observability | default true }}
 {{- end }}

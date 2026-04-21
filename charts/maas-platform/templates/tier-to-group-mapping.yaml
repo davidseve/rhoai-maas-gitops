@@ -1,0 +1,27 @@
+{{- if .Values.tiers }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tier-to-group-mapping
+  namespace: redhat-ods-applications
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+data:
+  tiers: |
+    [
+      {{- $last := sub (len .Values.tiers) 1 }}
+      {{- range $i, $tier := .Values.tiers }}
+      {
+        "name": {{ $tier.name | quote }},
+        "displayName": {{ $tier.displayName | quote }},
+        "level": {{ $tier.level }},
+        "groups": [
+          {{- $glast := sub (len $tier.groups) 1 }}
+          {{- range $gi, $g := $tier.groups }}
+          {{ $g.name | quote }}{{- if lt $gi $glast }},{{- end }}
+          {{- end }}
+        ]
+      }{{- if lt $i $last }},{{- end }}
+      {{- end }}
+    ]
+{{- end }}
