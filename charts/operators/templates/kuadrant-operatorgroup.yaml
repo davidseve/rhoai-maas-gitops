@@ -1,7 +1,7 @@
-{{- if .Values.kuadrant.enabled }}
+{{- if .Values.connectivityLink.enabled }}
 apiVersion: operators.coreos.com/v1
 kind: OperatorGroup
 metadata:
   name: kuadrant-operator
-  namespace: {{ .Values.kuadrant.namespace }}
+  namespace: {{ .Values.connectivityLink.namespace }}
 {{- end }}

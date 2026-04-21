@@ -5,7 +5,7 @@ rhoai:
   source: redhat-operators
   sourceNamespace: openshift-marketplace
 
-kuadrant:
+connectivityLink:
   enabled: true
   namespace: kuadrant-system
   channel: stable

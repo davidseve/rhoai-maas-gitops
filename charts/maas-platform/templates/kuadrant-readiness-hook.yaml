@@ -20,10 +20,19 @@ rules:
     verbs: ["get"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["list", "delete"]
+    verbs: ["list", "delete", "get"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "patch"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    verbs: ["get"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["patch"]
+  - apiGroups: ["operator.authorino.kuadrant.io"]
+    resources: ["authorinos"]
+    verbs: ["get", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -51,7 +60,7 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   backoffLimit: 3
-  activeDeadlineSeconds: 300
+  activeDeadlineSeconds: 600
   template:
     spec:
       serviceAccountName: kuadrant-readiness-check
@@ -85,7 +94,7 @@ spec:
 
                 if [ "$READY" = "True" ]; then
                   echo "Kuadrant is ready."
-                  exit 0
+                  break
                 fi
 
                 if [ "$REASON" = "MissingDependency" ]; then
@@ -93,7 +102,6 @@ spec:
                   oc delete pod -n kuadrant-system \
                     -l app.kubernetes.io/component=manager,app.kubernetes.io/name=kuadrant-operator \
                     --ignore-not-found=true 2>/dev/null || true
-                  # Fallback: try by deployment name
                   oc delete pod -n kuadrant-system \
                     -l control-plane=controller-manager \
                     --ignore-not-found=true 2>/dev/null || true
@@ -105,5 +113,97 @@ spec:
                 sleep 10
               done
 
-              echo "ERROR: Kuadrant did not become ready within timeout"
-              exit 1
+              if [ "$READY" != "True" ]; then
+                echo "ERROR: Kuadrant did not become ready within timeout"
+                exit 1
+              fi
+
+              echo ""
+              echo "=== Setting up Authorino TLS (official method) ==="
+              echo "Reference: opendatahub-io/models-as-a-service scripts/setup-authorino-tls.sh"
+              echo ""
+
+              NS=kuadrant-system
+              SVC=authorino-authorino-authorization
+              CERT_SECRET=authorino-server-cert
+              CA_MOUNT=/etc/ssl/certs/openshift-service-ca
+
+              # --- Step 1: Annotate service for serving cert generation ---
+              echo "Step 1: Annotating $SVC for serving cert..."
+              oc annotate service "$SVC" -n "$NS" \
+                "service.beta.openshift.io/serving-cert-secret-name=$CERT_SECRET" \
+                --overwrite
+
+              # --- Step 2: Enable listener TLS on Authorino CR ---
+              echo "Step 2: Enabling listener TLS on Authorino CR..."
+              oc patch authorino authorino -n "$NS" --type=merge -p '{
+                "spec": {
+                  "listener": {
+                    "tls": {
+                      "enabled": true,
+                      "certSecretRef": {
+                        "name": "'"$CERT_SECRET"'"
+                      }
+                    }
+                  },
+                  "volumes": {
+                    "items": [{
+                      "name": "service-ca",
+                      "configMaps": ["openshift-service-ca.crt"],
+                      "mountPath": "'"$CA_MOUNT"'"
+                    }]
+                  }
+                }
+              }'
+
+              # --- Step 3: Set env vars for outbound service-ca trust ---
+              echo "Step 3: Setting SSL_CERT_FILE on Authorino deployment..."
+              CA_FILE="$CA_MOUNT/service-ca.crt"
+
+              oc set env deployment/authorino -n "$NS" \
+                "SSL_CERT_FILE=$CA_FILE" \
+                "REQUESTS_CA_BUNDLE=$CA_FILE"
+
+              # --- Step 4: Restart Limitador and wait for rollouts ---
+              echo ""
+              echo "=== Restarting Limitador and waiting for rollouts ==="
+              echo ""
+
+              echo "Restarting Limitador pods..."
+              oc delete pod -n "$NS" \
+                -l limitador-resource=limitador,app=limitador \
+                --ignore-not-found=true 2>/dev/null || true
+
+              sleep 5
+
+              echo "Waiting for Authorino rollout..."
+              oc rollout status deployment/authorino -n "$NS" --timeout=180s 2>/dev/null || \
+                echo "WARNING: Authorino rollout status check failed"
+
+              echo "Waiting for Limitador rollout..."
+              oc rollout status deployment/limitador-limitador -n "$NS" --timeout=120s 2>/dev/null || \
+                echo "WARNING: Limitador rollout status check failed"
+
+              # --- Step 5: Restart Envoy Gateway pods ---
+              # Envoy must reload the WasmPlugin config after Authorino/Limitador changes.
+              echo ""
+              echo "=== Restarting Envoy Gateway pods ==="
+              GW_NS={{ .Values.gateway.namespace | quote }}
+              GW_NAME={{ .Values.gateway.name | quote }}
+              GW_LABEL="gateway.networking.k8s.io/gateway-name=$GW_NAME"
+
+              if oc get pods -n "$GW_NS" -l "$GW_LABEL" --no-headers 2>/dev/null | grep -q .; then
+                oc delete pod -n "$GW_NS" -l "$GW_LABEL" --ignore-not-found 2>/dev/null || true
+                sleep 10
+                echo "Waiting for Envoy Gateway rollout..."
+                DEPLOY=$(oc get deployment -n "$GW_NS" -l "$GW_LABEL" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+                if [ -n "$DEPLOY" ]; then
+                  oc rollout status "deployment/$DEPLOY" -n "$GW_NS" --timeout=120s 2>/dev/null || \
+                    echo "WARNING: Envoy rollout status check timed out"
+                fi
+              else
+                echo "No Envoy Gateway pods found (gateway may not be deployed yet)"
+              fi
+
+              echo ""
+              echo "=== Kuadrant stack ready with official TLS configuration ==="

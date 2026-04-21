@@ -1,12 +1,12 @@
-{{- if .Values.kuadrant.enabled }}
+{{- if .Values.connectivityLink.enabled }}
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:
-  name: {{ .Values.kuadrant.package }}
-  namespace: {{ .Values.kuadrant.namespace }}
+  name: {{ .Values.connectivityLink.package }}
+  namespace: {{ .Values.connectivityLink.namespace }}
 spec:
-  name: {{ .Values.kuadrant.package }}
-  channel: {{ .Values.kuadrant.channel }}
-  source: {{ .Values.kuadrant.source }}
-  sourceNamespace: {{ .Values.kuadrant.sourceNamespace }}
+  name: {{ .Values.connectivityLink.package }}
+  channel: {{ .Values.connectivityLink.channel }}
+  source: {{ .Values.connectivityLink.source }}
+  sourceNamespace: {{ .Values.connectivityLink.sourceNamespace }}
 {{- end }}
