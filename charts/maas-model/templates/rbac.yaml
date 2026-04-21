@@ -27,9 +27,9 @@ roleRef:
   kind: Role
   name: {{ .Values.global.name }}-view-role
 subjects:
-{{- range .Values.rbac.tierGroups }}
+{{- range $tier, $_ := .Values.tiers }}
 - apiGroup: rbac.authorization.k8s.io
   kind: Group
-  name: {{ . }}
+  name: system:serviceaccounts:{{ $.Values.llminferenceservice.gateway.name }}-tier-{{ $tier }}
 {{- end }}
 {{- end }}

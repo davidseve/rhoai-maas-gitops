@@ -1,4 +1,4 @@
-{{- if .Values.rateLimiting.requestRates.enabled }}
+{{- if .Values.tiers }}
 apiVersion: kuadrant.io/v1
 kind: RateLimitPolicy
 metadata:
@@ -12,13 +12,13 @@ spec:
     kind: HTTPRoute
     name: {{ .Values.global.name }}-kserve-route
   limits:
-    {{- range .Values.rateLimiting.tiers }}
-    {{ .name }}:
+    {{- range $tier, $cfg := .Values.tiers }}
+    {{ $tier }}:
       rates:
-        {{- toYaml .requestRates | nindent 8 }}
+        {{- toYaml $cfg.requestRates | nindent 8 }}
       when:
         - predicate: |
-            auth.identity.tier == "{{ .name }}"
+            auth.identity.tier == "{{ $tier }}"
       counters:
         - expression: auth.identity.userid
     {{- end }}

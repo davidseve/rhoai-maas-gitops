@@ -29,37 +29,28 @@ resources:
 
 llminferenceservice:
   replicas: 1
-  tiers:
-    - free
-    - premium
   gateway:
     name: maas-default-gateway
     namespace: openshift-ingress
 
 rbac:
   enabled: true
-  tierGroups:
-    - system:serviceaccounts:maas-default-gateway-tier-free
-    - system:serviceaccounts:maas-default-gateway-tier-premium
 
-# Rate limiting configuration (per-tier, per-model via HTTPRoute targeting)
-rateLimiting:
-  requestRates:
-    enabled: true
-  tokenRates:
-    enabled: true
-  tiers:
-    - name: free
-      requestRates:
-        - limit: 10
-          window: 1m
-      tokenRates:
-        - limit: 5000
-          window: 1m
-    - name: premium
-      requestRates:
-        - limit: 50
-          window: 1m
-      tokenRates:
-        - limit: 50000
-          window: 1m
+# Tier definitions: key = tier name, used to derive LLMInferenceService annotation,
+# RBAC group bindings, RateLimitPolicy, and TokenRateLimitPolicy.
+# Tier names must match those in maas-platform/values.yaml (the cross-chart contract).
+tiers:
+  free:
+    requestRates:
+      - limit: 10
+        window: 1m
+    tokenRates:
+      - limit: 5000
+        window: 1m
+  premium:
+    requestRates:
+      - limit: 50
+        window: 1m
+    tokenRates:
+      - limit: 50000
+        window: 1m

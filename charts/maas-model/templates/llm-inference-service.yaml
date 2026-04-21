@@ -4,7 +4,7 @@ metadata:
   name: {{ .Values.global.name }}
   namespace: {{ .Values.global.namespace }}
   annotations:
-    alpha.maas.opendatahub.io/tiers: {{ .Values.llminferenceservice.tiers | toJson | quote }}
+    alpha.maas.opendatahub.io/tiers: {{ keys .Values.tiers | sortAlpha | toJson | quote }}
     security.opendatahub.io/enable-auth: "true"
 spec:
   model:

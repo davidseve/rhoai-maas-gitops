@@ -68,8 +68,9 @@ limitador:
   # Enables limit_name labels on authorized metrics (not just limited_calls)
   exhaustiveTelemetry: true
 
-# Tier definitions: mapped to tier-to-group-mapping ConfigMap + OpenShift Groups
-# Rate limits are defined in maas-model/values.yaml (RateLimitPolicy / TokenRateLimitPolicy)
+# Tier definitions: mapped to tier-to-group-mapping ConfigMap + OpenShift Groups.
+# Tier names (free, premium) are the cross-chart contract with maas-model/values.yaml,
+# which defines per-tier rate limits (RateLimitPolicy / TokenRateLimitPolicy).
 tiers:
   - name: free
     displayName: "Free"

@@ -27,37 +27,26 @@ resources:
 
 llminferenceservice:
   replicas: 1
-  tiers:
-    - free
-    - premium
   gateway:
     name: maas-default-gateway
     namespace: openshift-ingress
 
 rbac:
   enabled: true
-  tierGroups:
-    - system:serviceaccounts:maas-default-gateway-tier-free
-    - system:serviceaccounts:maas-default-gateway-tier-premium
 
 # Generous rate limits (compared to tinyllama-test)
-rateLimiting:
-  requestRates:
-    enabled: true
-  tokenRates:
-    enabled: true
-  tiers:
-    - name: free
-      requestRates:
-        - limit: 100
-          window: 1m
-      tokenRates:
-        - limit: 10000
-          window: 1m
-    - name: premium
-      requestRates:
-        - limit: 500
-          window: 1m
-      tokenRates:
-        - limit: 100000
-          window: 1m
+tiers:
+  free:
+    requestRates:
+      - limit: 100
+        window: 1m
+    tokenRates:
+      - limit: 10000
+        window: 1m
+  premium:
+    requestRates:
+      - limit: 500
+        window: 1m
+    tokenRates:
+      - limit: 100000
+        window: 1m
