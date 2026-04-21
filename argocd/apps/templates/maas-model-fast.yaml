@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: maas-model-fast
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/davidseve/rhoai-maas-gitops.git
+    targetRevision: main
+    path: charts/maas-model
+    helm:
+      valueFiles:
+        - values-tinyllama-fast.yaml
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 30
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 15m
+  ignoreDifferences:
+    - group: serving.kserve.io
+      kind: LLMInferenceService
+      jsonPointers:
+        - /metadata/annotations
+        - /spec

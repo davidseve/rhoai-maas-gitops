@@ -84,9 +84,16 @@ tiers:
       - name: tier-premium-users
         users: []
 
-  - name: enterprise
-    displayName: "Enterprise"
-    level: 2
-    groups:
-      - name: tier-enterprise-users
-        users: []
+# TelemetryPolicy: enriches Limitador metrics with user/group/model labels
+telemetry:
+  enabled: true
+
+# ServiceMonitor for Limitador metrics scraping
+monitoring:
+  enabled: true
+  scrapeInterval: 30s
+
+# PrometheusRule alerts for rate limit health
+alerting:
+  enabled: true
+  rejectionRateThreshold: 0.3

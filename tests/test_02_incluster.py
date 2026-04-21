@@ -4,9 +4,9 @@ Uses ephemeral pods via ``oc run --rm`` to test from inside the cluster.
 """
 
 import json
-import re
 import subprocess
 import os
+import uuid
 
 import pytest
 
@@ -55,9 +55,18 @@ def _extract_json(text: str) -> dict:
 
 
 def _run_in_cluster(script: str, timeout: int = 90) -> str:
-    """Run a bash script inside an ephemeral pod and return stdout."""
+    """Run a bash script inside an ephemeral pod and return stdout.
+
+    Each invocation uses a unique pod name to avoid collisions when a
+    previous pod was not cleaned up properly (e.g. after a timeout).
+    """
+    pod_name = f"e2e-incluster-{uuid.uuid4().hex[:8]}"
+    subprocess.run(
+        ["oc", "delete", "pod", pod_name, "--ignore-not-found"],
+        capture_output=True, timeout=15,
+    )
     cmd = [
-        "oc", "run", "e2e-incluster-test",
+        "oc", "run", pod_name,
         "--rm", "-i", "--restart=Never",
         f"--image={INCLUSTER_IMAGE}",
         "--", "bash", "-c", script,
@@ -65,6 +74,12 @@ def _run_in_cluster(script: str, timeout: int = 90) -> str:
     result = subprocess.run(
         cmd, capture_output=True, text=True, timeout=timeout
     )
+    if not result.stdout.strip():
+        pytest.fail(
+            f"oc run returned empty stdout.\n"
+            f"stderr: {result.stderr[:500]}\n"
+            f"returncode: {result.returncode}"
+        )
     return result.stdout
 
 

@@ -19,6 +19,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ---------------------------------------------------------------------------
 
 MODEL_NAME = os.getenv("MAAS_MODEL_NAME", "tinyllama-test")
+MODEL2_NAME = os.getenv("MAAS_MODEL2_NAME", "tinyllama-fast")
 MODEL_NAMESPACE = os.getenv("MAAS_MODEL_NAMESPACE", "maas-models")
 GATEWAY_NAME = os.getenv("MAAS_GATEWAY_NAME", "maas-default-gateway")
 GATEWAY_NAMESPACE = os.getenv("MAAS_GATEWAY_NAMESPACE", "openshift-ingress")
@@ -146,15 +147,40 @@ def gateway_namespace():
 
 @pytest.fixture(scope="session")
 def inference_path():
-    """URL path segment for chat completions."""
+    """URL path segment for chat completions (model 1)."""
     return f"/maas-models/{MODEL_NAME}/v1/chat/completions"
 
 
 @pytest.fixture(scope="session")
 def chat_payload():
-    """Minimal chat completion request body."""
+    """Minimal chat completion request body (model 1)."""
     return {
         "model": MODEL_NAME,
+        "messages": [{"role": "user", "content": "Say hello in one word"}],
+        "max_tokens": 20,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Model 2 fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def model2_name():
+    return MODEL2_NAME
+
+
+@pytest.fixture(scope="session")
+def inference_path_model2():
+    """URL path segment for chat completions (model 2)."""
+    return f"/maas-models/{MODEL2_NAME}/v1/chat/completions"
+
+
+@pytest.fixture(scope="session")
+def chat_payload_model2():
+    """Minimal chat completion request body (model 2)."""
+    return {
+        "model": MODEL2_NAME,
         "messages": [{"role": "user", "content": "Say hello in one word"}],
         "max_tokens": 20,
     }

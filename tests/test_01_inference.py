@@ -1,4 +1,4 @@
-"""External Route: token generation and chat completions."""
+"""External Route: token generation and chat completions for both models."""
 
 import requests
 import urllib3
@@ -121,3 +121,40 @@ class TestChatCompletions:
         usage = body["usage"]
         assert usage["prompt_tokens"] > 0
         assert usage["completion_tokens"] > 0
+
+
+class TestModel2ChatCompletions:
+    """Verify inference works on the second model (tinyllama-fast)."""
+
+    def test_model2_inference_returns_200(
+        self, maas_url, maas_token, inference_path_model2, chat_payload_model2
+    ):
+        resp = requests.post(
+            f"{maas_url}{inference_path_model2}",
+            headers={
+                "Authorization": f"Bearer {maas_token}",
+                "Content-Type": "application/json",
+            },
+            json=chat_payload_model2,
+            verify=False,
+            timeout=60,
+        )
+        assert resp.status_code == 200
+
+    def test_model2_response_has_choices(
+        self, maas_url, maas_token, inference_path_model2, chat_payload_model2
+    ):
+        resp = requests.post(
+            f"{maas_url}{inference_path_model2}",
+            headers={
+                "Authorization": f"Bearer {maas_token}",
+                "Content-Type": "application/json",
+            },
+            json=chat_payload_model2,
+            verify=False,
+            timeout=60,
+        )
+        body = resp.json()
+        assert "choices" in body
+        assert len(body["choices"]) > 0
+        assert body["model"] == "tinyllama-fast"

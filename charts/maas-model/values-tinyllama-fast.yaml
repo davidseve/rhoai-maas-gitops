@@ -1,21 +1,19 @@
 global:
-  name: tinyllama-test
+  name: tinyllama-fast
   namespace: maas-models
 
 mode: llminferenceservice
 
 namespace:
-  create: true
+  create: false
 
 model:
   storageUri: "oci://quay.io/rh-aiservices-bu/tinyllama:1.0"
-  servedName: "tinyllama-test"
+  servedName: "tinyllama-fast"
   maxModelLen: 2048
 
 images:
   vllm:
-    # CPU: quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9:0.3
-    # GPU: quay.io/modh/vllm:rhoai-2.20-cuda (default llm-d image)
     repository: "quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9"
     tag: "0.3"
 
@@ -42,7 +40,7 @@ rbac:
     - system:serviceaccounts:maas-default-gateway-tier-free
     - system:serviceaccounts:maas-default-gateway-tier-premium
 
-# Rate limiting configuration (per-tier, per-model via HTTPRoute targeting)
+# Generous rate limits (compared to tinyllama-test)
 rateLimiting:
   requestRates:
     enabled: true
@@ -51,15 +49,15 @@ rateLimiting:
   tiers:
     - name: free
       requestRates:
-        - limit: 10
+        - limit: 100
           window: 1m
       tokenRates:
-        - limit: 5000
+        - limit: 10000
           window: 1m
     - name: premium
       requestRates:
-        - limit: 50
+        - limit: 500
           window: 1m
       tokenRates:
-        - limit: 50000
+        - limit: 100000
           window: 1m
