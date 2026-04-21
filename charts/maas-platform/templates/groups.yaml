@@ -1,0 +1,21 @@
+{{- range .Values.tiers }}
+{{- range .groups }}
+{{- if ne .name "system:authenticated" }}
+---
+apiVersion: user.openshift.io/v1
+kind: Group
+metadata:
+  name: {{ .name }}
+  annotations:
+    helm.sh/resource-policy: keep
+{{- if .users }}
+users:
+{{- range .users }}
+  - {{ . }}
+{{- end }}
+{{- else }}
+users: []
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

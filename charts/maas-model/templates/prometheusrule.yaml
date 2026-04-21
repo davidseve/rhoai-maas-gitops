@@ -1,0 +1,45 @@
+{{- if .Values.alerting.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: maas-alerts
+  namespace: kuadrant-system
+  labels:
+    app: limitador
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  groups:
+    - name: maas-rate-limits
+      rules:
+        - alert: MaaSLimitadorDown
+          expr: limitador_up == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Limitador is down"
+            description: "Limitador rate limiter has been down for more than 1 minute."
+
+        - alert: MaaSHighRejectionRate
+          expr: |
+            (
+              rate(limited_calls[5m])
+              / (rate(authorized_calls[5m]) + rate(limited_calls[5m]))
+            ) > {{ .Values.alerting.rejectionRateThreshold | default 0.3 }}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High rate limit rejection rate"
+            description: "More than {{ mul (int (.Values.alerting.rejectionRateThreshold | default 0.3)) 100 | default 30 }}% of requests are being rate limited on {{ "{{ $labels.limitador_namespace }}" }}."
+
+        - alert: MaaSDatastorePartitioned
+          expr: datastore_partitioned == 1
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Limitador datastore partitioned"
+            description: "Limitador has lost connectivity to its backing datastore."
+{{- end }}

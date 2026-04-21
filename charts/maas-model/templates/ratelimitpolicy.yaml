@@ -1,0 +1,25 @@
+{{- if .Values.rateLimiting.requestRates.enabled }}
+apiVersion: kuadrant.io/v1
+kind: RateLimitPolicy
+metadata:
+  name: gateway-rate-limits
+  namespace: openshift-ingress
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: maas-default-gateway
+  limits:
+    {{- range .Values.rateLimiting.tiers }}
+    {{ .name }}:
+      rates:
+        {{- toYaml .requestRates | nindent 8 }}
+      when:
+        - predicate: |
+            auth.identity.tier == "{{ .name }}"
+      counters:
+        - expression: auth.identity.userid
+    {{- end }}
+{{- end }}

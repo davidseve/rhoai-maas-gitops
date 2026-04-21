@@ -62,3 +62,61 @@ route:
   # reencrypt: router terminates external TLS, re-encrypts to Gateway with service-ca cert.
   #   Requires gateway.tlsSecretName to be a service-ca cert + annotation on the svc.
   tlsTermination: passthrough
+
+# Limitador configuration
+limitador:
+  # Enables limit_name labels on authorized metrics (not just limited_calls)
+  exhaustiveTelemetry: true
+
+# Tier definitions: mapped to tier-to-group-mapping ConfigMap + OpenShift Groups
+# Each tier defines: name, displayName, level, groups, requestRates, tokenRates
+tiers:
+  - name: free
+    displayName: "Free"
+    level: 0
+    groups:
+      - name: system:authenticated
+    requestRates:
+      - limit: 100
+        window: 1m
+      - limit: 5000
+        window: 24h
+    tokenRates:
+      - limit: 10000
+        window: 1m
+      - limit: 500000
+        window: 24h
+
+  - name: premium
+    displayName: "Premium"
+    level: 1
+    groups:
+      - name: tier-premium-users
+        users: []
+    requestRates:
+      - limit: 500
+        window: 1m
+      - limit: 50000
+        window: 24h
+    tokenRates:
+      - limit: 100000
+        window: 1m
+      - limit: 5000000
+        window: 24h
+
+  - name: enterprise
+    displayName: "Enterprise"
+    level: 2
+    groups:
+      - name: tier-enterprise-users
+        users: []
+    requestRates:
+      - limit: 2000
+        window: 1m
+      - limit: 200000
+        window: 24h
+    tokenRates:
+      - limit: 500000
+        window: 1m
+      - limit: 25000000
+        window: 24h
